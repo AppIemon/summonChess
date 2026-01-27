@@ -135,13 +135,9 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
       return;
     }
 
-    if (gameState.turn !== myColor && myColor !== 'w') {
-      // Allow selection only if it's potentially my turn?
-      // Actually for now "Pass and Play", so just check turn.
+    if (gameState.turn !== myColor) {
+      return;
     }
-
-    // If it's not the turn of the color trying to select...
-    // We act as "Current Player".
 
     setSelectedHandPiece(piece);
     setSelectedSquare(null);
@@ -158,8 +154,9 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
     import('chess.js').then(({ Chess }) => {
       const chess = new Chess(gameState.fen);
 
-      const minRank = 1;
-      const maxRank = 8;
+      // Define summonable ranks based on turn
+      const minRank = gameState.turn === 'w' ? 1 : 5;
+      const maxRank = gameState.turn === 'w' ? 4 : 8;
 
       for (let r = minRank; r <= maxRank; r++) {
         for (let c = 0; c < 8; c++) {
@@ -234,7 +231,7 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
           color={myColor}
           onSelect={handleHandSelect}
           selectedPiece={selectedHandPiece}
-          disabled={gameState.turn !== myColor && false} // Allow selection for local play
+          disabled={gameState.turn !== myColor}
           className={styles.myHand}
         />
       </div>
