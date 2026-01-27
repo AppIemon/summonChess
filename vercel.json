@@ -1,0 +1,11 @@
+{
+  "framework": "nextjs",
+  "name": "summon-chess",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/:path*"
+    }
+  ],
+  "crons": []
+}

@@ -9,9 +9,15 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "chess.js": "^1.4.0",
+    "clsx": "^2.1.1",
+    "mongoose": "^9.1.5",
     "next": "16.1.5",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "swr": "^2.3.8",
+    "tailwind-merge": "^3.4.0",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@types/node": "^20",
