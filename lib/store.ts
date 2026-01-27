@@ -1,16 +1,22 @@
 import { SummonChessGame } from './game/engine';
 import { GameState } from './game/types';
 
-// Simple in-memory store for development/demo. 
-// In production, replace with Redis/MongoDB.
-const games = new Map<string, SummonChessGame>();
+// Declare global types to prevent TS errors
+const globalForStore = globalThis as unknown as {
+  games: Map<string, SummonChessGame>;
+  waitingQueue: string[];
+  matchedGames: Map<string, string>;
+};
 
-interface QueueEntry {
-  playerId: string;
-  res?: (gameId: string) => void;
+const games = globalForStore.games || new Map<string, SummonChessGame>();
+const waitingQueue = globalForStore.waitingQueue || [];
+const matchedGames = globalForStore.matchedGames || new Map<string, string>();
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForStore.games = games;
+  globalForStore.waitingQueue = waitingQueue;
+  globalForStore.matchedGames = matchedGames;
 }
-const waitingQueue: string[] = []; // List of playerIds
-const matchedGames = new Map<string, string>(); // playerId -> gameId
 
 export const GameStore = {
   createGame: (id: string) => {
@@ -42,7 +48,7 @@ export const GameStore = {
 
       // Create Game
       const gameId = crypto.randomUUID(); // Need node 19+ or polyfill. uuidv4 better.
-      // Assume uuid is available or use random string.
+
       // Assign opponentId as White, playerId as Black (First come served white?)
       const game = new SummonChessGame(undefined, undefined, undefined, opponentId, playerId);
       games.set(gameId, game);
