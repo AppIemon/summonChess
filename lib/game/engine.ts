@@ -7,7 +7,10 @@ export class SummonChessGame {
   private blackDeck: PieceType[];
   private lastMove: { from: string; to: string } | null = null;
 
-  constructor(fen?: string, whiteDeck?: PieceType[], blackDeck?: PieceType[]) {
+  private whitePlayerId?: string;
+  private blackPlayerId?: string;
+
+  constructor(fen?: string, whiteDeck?: PieceType[], blackDeck?: PieceType[], whitePlayerId?: string, blackPlayerId?: string) {
     // Default setup: Kings only.
     // 4k3/8/8/8/8/8/8/4K3 w - - 0 1
     this.chess = new Chess(fen || '4k3/8/8/8/8/8/8/4K3 w - - 0 1');
@@ -16,6 +19,8 @@ export class SummonChessGame {
     const defaultDeck: PieceType[] = ['q', 'r', 'r', 'b', 'b', 'n', 'n', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'];
     this.whiteDeck = whiteDeck ? [...whiteDeck] : [...defaultDeck];
     this.blackDeck = blackDeck ? [...blackDeck] : [...defaultDeck];
+    this.whitePlayerId = whitePlayerId;
+    this.blackPlayerId = blackPlayerId;
   }
 
   public getState(): GameState {
@@ -25,12 +30,14 @@ export class SummonChessGame {
       whiteDeck: [...this.whiteDeck],
       blackDeck: [...this.blackDeck],
       isCheck: this.chess.inCheck(),
-      isCheckmate: this.chess.isCheckmate(),
+      isCheckmate: this.isTrueCheckmate(),
       isDraw: this.chess.isDraw(), // Note: logic might be overridden
       isStalemate: this.checkStalemate(),
       winner: this.getWinner(),
       history: this.chess.history(),
       lastMove: this.lastMove,
+      whitePlayerId: this.whitePlayerId,
+      blackPlayerId: this.blackPlayerId,
     };
   }
 
@@ -165,13 +172,69 @@ export class SummonChessGame {
   }
 
   private checkGameOver(): boolean {
-    return this.chess.isCheckmate() || (this.checkStalemate()) || this.chess.isDraw();
-    // note: isDraw checks 50-move, insufficient material, etc. 
-    // Insufficient material might be tricky if decks are empty.
+    return this.isTrueCheckmate() || (this.checkStalemate()) || this.chess.isDraw();
+  }
+
+  private isTrueCheckmate(): boolean {
+    if (!this.chess.isCheckmate()) return false;
+    // Standard checkmate is true (no moves). Check if summons can save.
+    return !this.canSummonToEscape();
+  }
+
+  private canSummonToEscape(): boolean {
+    const turn = this.chess.turn();
+    const deck = turn === 'w' ? this.whiteDeck : this.blackDeck;
+    if (deck.length === 0) return false;
+
+    // We need to see if ANY summon results in NOT being in check.
+    // Try each unique piece in deck
+    const uniquePieces = Array.from(new Set(deck));
+
+    // We can use a temporary chess instance to test.
+    // Optimisation: Only check empty squares.
+    // Optimisation: Only check squares that block the check line or capture the attacker?
+    // Capturing by summon is impossible (cannot summon on piece).
+    // So we must BLOCK the line of fire.
+    // Or if checking piece is a knight/pawn (not sliding), it cannot be blocked.
+    // If double check, it's harder.
+
+    // Brute force is safest: Try summing every unique piece to every valid square.
+    // 8x4 = 32 squares max (usually less). 5 piece types max. ~150 checks. Fast enough.
+
+    const fen = this.chess.fen();
+
+    for (const piece of uniquePieces) {
+      for (let r = 1; r <= 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          // Optimization: Check only my half?
+          // White: Rank 1-4. Black: Rank 5-8.
+          if (turn === 'w' && r > 4) continue;
+          if (turn === 'b' && r < 5) continue;
+
+          // Pawn restrictions
+          if (piece === 'p' && (r === 1 || r === 8)) continue;
+
+          const file = 'abcdefgh'[c];
+          const square = (file + r) as Square;
+
+          // Must be empty
+          if (this.chess.get(square)) continue;
+
+          // Test Summon
+          const tempChess = new Chess(fen);
+          tempChess.put({ type: piece, color: turn }, square);
+
+          if (!tempChess.inCheck()) {
+            return true; // Found a savior!
+          }
+        }
+      }
+    }
+    return false;
   }
 
   private getWinner(): PieceColor | null {
-    if (this.chess.isCheckmate()) {
+    if (this.isTrueCheckmate()) {
       return this.chess.turn() === 'w' ? 'b' : 'w';
     }
     return null;

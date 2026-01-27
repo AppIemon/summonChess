@@ -9,21 +9,11 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [matchStatus, setMatchStatus] = useState<string>('');
 
-  const createGame = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/game', { method: 'POST' });
-      const data = await res.json();
-      router.push(`/game/${data.id}`);
-    } catch (e) {
-      alert('Failed to create game');
-      setLoading(false);
-    }
-  };
+  // const createGame = async () => { ... } // Removed
 
   const findMatch = async () => {
     setLoading(true);
-    setMatchStatus('Looking for opponent...');
+    setMatchStatus('상대를 찾는 중...');
 
     // Generate random player ID if not exists
     let playerId = localStorage.getItem('playerId');
@@ -57,7 +47,7 @@ export default function Home() {
       }, 1000);
 
     } catch (e) {
-      setMatchStatus('Error finding match');
+      setMatchStatus('매칭 찾기 오류');
       setLoading(false);
     }
   };
@@ -71,27 +61,12 @@ export default function Home() {
       height: '100vh',
       gap: '20px'
     }}>
-      <h1 style={{ fontSize: '3rem', fontWeight: 'bold' }}>SUMMON CHESS</h1>
-      <p style={{ color: '#666', maxWidth: '600px', textAlign: 'center' }}>
-        Classic Chess with a twist. Start with only Kings. Summon your army to the battlefield.
+      <h1 style={{ fontSize: '3rem', fontWeight: 'bold' }}>소환 체스</h1>
+      <p style={{ color: '#666', maxWidth: '600px', textAlign: 'center', wordBreak: 'keep-all' }}>
+        기존 체스에 소환 시스템을 더했습니다. 킹 하나로 시작하여 당신의 군대를 전장에 소환하세요.
       </p>
 
       <div style={{ display: 'flex', gap: '10px' }}>
-        <button
-          onClick={createGame}
-          disabled={loading}
-          style={{
-            padding: '15px 30px',
-            fontSize: '1.2rem',
-            background: '#333',
-            color: '#fff',
-            borderRadius: '8px',
-            border: 'none',
-            cursor: 'pointer'
-          }}
-        >
-          Pass & Play
-        </button>
         <button
           onClick={findMatch}
           disabled={loading}
@@ -105,17 +80,17 @@ export default function Home() {
             cursor: 'pointer'
           }}
         >
-          {loading && matchStatus ? matchStatus : 'Find Online Match'}
+          {loading && matchStatus ? matchStatus : '온라인 매칭 찾기'}
         </button>
       </div>
 
       <div style={{ marginTop: '40px', textAlign: 'center', color: '#888', fontSize: '0.9rem' }}>
-        <p>Rules:</p>
-        <ul style={{ listStyle: 'none' }}>
-          <li>Turn: Move or Summon</li>
-          <li>Summon pieces from your deck to your side of the board.</li>
-          <li>Dead pieces are gone forever.</li>
-          <li>Checkmate to win.</li>
+        <p>규칙:</p>
+        <ul style={{ listStyle: 'none', padding: 0 }}>
+          <li>턴: 이동 또는 소환</li>
+          <li>기물을 자신의 진영에 소환하세요.</li>
+          <li>죽은 기물은 영구적으로 제거됩니다.</li>
+          <li>체크메이트로 승리하세요.</li>
         </ul>
       </div>
     </div>

@@ -7,7 +7,11 @@ import Hand from './Hand';
 import { GameState, PieceType, PieceColor } from '@/lib/game/types';
 import styles from './GameInterface.module.css';
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+const fetcher = async (url: string) => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('API Error');
+  return res.json();
+};
 
 interface GameInterfaceProps {
   gameId: string;
@@ -25,7 +29,19 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
   const [validTargetSquares, setValidTargetSquares] = useState<string[]>([]);
   const [myColor, setMyColor] = useState<PieceColor>('w'); // Default to White perspective
 
-  // Reset selection when turn changes? Maybe.
+  // Automatic orientation
+  useEffect(() => {
+    if (gameState) {
+      const playerId = localStorage.getItem('playerId');
+      if (playerId === gameState.whitePlayerId) {
+        setMyColor('w');
+      } else if (playerId === gameState.blackPlayerId) {
+        setMyColor('b');
+      }
+    }
+  }, [gameState?.whitePlayerId, gameState?.blackPlayerId]);
+
+  // Reset selection when turn changes
   useEffect(() => {
     if (gameState) {
       setValidTargetSquares([]);
@@ -34,8 +50,8 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
     }
   }, [gameState?.turn]);
 
-  if (error) return <div>Failed to load game</div>;
-  if (!gameState) return <div>Loading...</div>;
+  if (error) return <div>게임을 불러오는데 실패했습니다</div>;
+  if (!gameState) return <div>로딩 중...</div>;
 
   const handleSquareClick = async (square: string) => {
     // If we have a selected hand piece, try to summon
@@ -176,19 +192,19 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
       setSelectedHandPiece(null);
       setValidTargetSquares([]);
     } else {
-      alert('Invalid move');
+      alert('유효하지 않은 이동입니다');
     }
   };
 
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <h2>Summon Chess</h2>
+        <h2>소환 체스</h2>
         <div className={styles.status}>
-          Turn: {gameState.turn === 'w' ? 'White' : 'Black'}
-          {gameState.isCheck && <span className={styles.check}> CHECK!</span>}
-          {gameState.isCheckmate && <span className={styles.mate}> CHECKMATE! Winner: {gameState.winner}</span>}
-          {gameState.isStalemate && <span className={styles.draw}> STALEMATE</span>}
+          차례: {gameState.turn === 'w' ? '백' : '흑'}
+          {gameState.isCheck && <span className={styles.check}> 체크!</span>}
+          {gameState.isCheckmate && <span className={styles.mate}> 체크메이트! 승자: {gameState.winner === 'w' ? '백' : '흑'}</span>}
+          {gameState.isStalemate && <span className={styles.draw}> 스테일메이트</span>}
         </div>
       </div>
 
@@ -224,9 +240,9 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
       </div>
 
       <div className={styles.controls}>
-        <button onClick={() => setMyColor(myColor === 'w' ? 'b' : 'w')}>Flip Board</button>
-        <button onClick={() => navigator.clipboard.writeText(window.location.href)}>Share Link</button>
-        <button onClick={() => alert('Guide:\n- Move or Summon per turn.\n- Summon on your half.\n- Win by Checkmate.')}>Help</button>
+        <button onClick={() => setMyColor(myColor === 'w' ? 'b' : 'w')}>보드 뒤집기</button>
+        <button onClick={() => navigator.clipboard.writeText(window.location.href)}>링크 공유</button>
+        <button onClick={() => alert('가이드:\n- 턴마다 이동 또는 소환.\n- 자신의 진영에 소환.\n- 체크메이트로 승리.')}>도움말</button>
       </div>
     </div>
   );

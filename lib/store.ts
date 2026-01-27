@@ -43,7 +43,8 @@ export const GameStore = {
       // Create Game
       const gameId = crypto.randomUUID(); // Need node 19+ or polyfill. uuidv4 better.
       // Assume uuid is available or use random string.
-      const game = new SummonChessGame();
+      // Assign opponentId as White, playerId as Black (First come served white?)
+      const game = new SummonChessGame(undefined, undefined, undefined, opponentId, playerId);
       games.set(gameId, game);
 
       // Store match info

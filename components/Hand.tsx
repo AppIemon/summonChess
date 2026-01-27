@@ -14,13 +14,14 @@ interface HandProps {
 }
 
 export default function Hand({
-  pieces,
+  pieces = [],
   color,
   onSelect,
   selectedPiece,
   className,
   disabled
 }: HandProps) {
+  if (!pieces) return null; // Safety check
   // Group pieces by type
   const counts = pieces.reduce((acc, p) => {
     acc[p] = (acc[p] || 0) + 1;
@@ -49,7 +50,7 @@ export default function Hand({
           </div>
         );
       })}
-      {uniquePieces.length === 0 && <span style={{ fontSize: '12px', color: '#999' }}>Empty Deck</span>}
+      {uniquePieces.length === 0 && <span style={{ fontSize: '12px', color: '#999' }}>빈 덱</span>}
     </div>
   );
 }
