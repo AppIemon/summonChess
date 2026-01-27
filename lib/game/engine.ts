@@ -45,21 +45,27 @@ export class SummonChessGame {
     return this.chess.moves({ square, verbose: true });
   }
 
+
   public executeAction(action: Action, playerId?: string): boolean {
-    if (this.checkGameOver()) return false;
+    if (this.checkGameOver()) {
+      console.log("Action rejected: Game Over");
+      return false;
+    }
 
     const turn = this.chess.turn();
 
     // Validate Player
     if (playerId) {
       if (turn === 'w' && this.whitePlayerId && playerId !== this.whitePlayerId) {
-        console.log("Not White's turn or wrong ID");
+        console.log(`Action rejected: Not White's turn. Current Turn: ${turn}, Req ID: ${playerId}, White ID: ${this.whitePlayerId}`);
         return false;
       }
       if (turn === 'b' && this.blackPlayerId && playerId !== this.blackPlayerId) {
-        console.log("Not Black's turn or wrong ID");
+        console.log(`Action rejected: Not Black's turn. Current Turn: ${turn}, Req ID: ${playerId}, Black ID: ${this.blackPlayerId}`);
         return false;
       }
+    } else {
+      console.log("Warning: No playerId provided for action");
     }
 
     if (action.type === 'move') {
@@ -94,10 +100,6 @@ export class SummonChessGame {
     if (this.chess.get(square)) return false;
 
     // Validate placement rules
-    // White: Rank 1-4 (Index 0-3 ??? No, chess.js uses Rank 1-8 logic or 0-7?)
-    // chess.js square 'a1' is bottom left.
-    // Rank 1 is '1'.
-
     const rank = parseInt(square[1]);
 
     // Pawn restriction: No rank 1 or 8
@@ -225,7 +227,7 @@ export class SummonChessGame {
     for (const piece of uniquePieces) {
       for (let r = 1; r <= 8; r++) {
         for (let c = 0; c < 8; c++) {
-          // Optimization: Check only my half?
+          // Optimization: Check only my half? NO, restriction removed.
           // White: Rank 1-4. Black: Rank 5-8.
           // if (turn === 'w' && r > 4) continue;
           // if (turn === 'b' && r < 5) continue;
