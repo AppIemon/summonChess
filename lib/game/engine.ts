@@ -45,11 +45,22 @@ export class SummonChessGame {
     return this.chess.moves({ square, verbose: true });
   }
 
-  public executeAction(action: Action): boolean {
+  public executeAction(action: Action, playerId?: string): boolean {
     if (this.checkGameOver()) return false;
 
-    // Ensure it's the correct turn is implicitly handled by chess.js for moves, but we must check for summons
     const turn = this.chess.turn();
+
+    // Validate Player
+    if (playerId) {
+      if (turn === 'w' && this.whitePlayerId && playerId !== this.whitePlayerId) {
+        console.log("Not White's turn or wrong ID");
+        return false;
+      }
+      if (turn === 'b' && this.blackPlayerId && playerId !== this.blackPlayerId) {
+        console.log("Not Black's turn or wrong ID");
+        return false;
+      }
+    }
 
     if (action.type === 'move') {
       try {
@@ -99,42 +110,50 @@ export class SummonChessGame {
     // but `put` exists. However, `put` doesn't change turn or record history.
     // To record history, we might need to hack it or just accept it's a custom move.
 
+    // Temporarily place the piece to check legality
     const success = this.chess.put({ type: piece, color: turn }, square);
-    if (!success) return false;
+    if (!success) {
+      console.log("Put failed");
+      return false;
+    }
+
+    // Check if we are checking ourselves (Self-check)
+    if (this.chess.inCheck()) {
+      console.log("Self check prevented");
+      this.chess.remove(square); // Revert
+      return false;
+    }
 
     // Remove from deck
     deck.splice(pieceIndex, 1);
 
     // Switch turn manually since put doesn't do it
-    // To switch turn in chess.js without a move, we have to manipulate the FEN.
     const fen = this.chess.fen();
     const parts = fen.split(' ');
     parts[1] = parts[1] === 'w' ? 'b' : 'w'; // Switch turn
-    parts[3] = '-'; // En passant is lost? Maybe. Usually if you summon, you don't create en-passant opportunities, but previous ones expire.
-    // Actually, according to Chess rules, en-passant target is valid only for the immediate move. 
-    // If "Summon" consumes a turn, the previous en-passant opportunity is GONE.
-    // So parts[3] should be '-'.
+    parts[3] = '-'; // En passant
+    parts[4] = '0'; // Halfmove reset?
 
-    // Update Halfmove clock (parts[4])? Yes, increments for non-capture/non-pawn. 
-    // But this is an "Add piece". It resets 50-move rule? 
-    // Standard crazyhouse drops reset the 50-move counter.
-    parts[4] = '0';
-
-    // Fullmove number (parts[5]) increments after Black moves.
+    // Fullmove number
     if (turn === 'b') {
       parts[5] = (parseInt(parts[5]) + 1).toString();
     }
 
     const newFen = parts.join(' ');
-    this.chess.load(newFen);
-
-    // Add to history? chess.js history won't have it.
-    // We might need a separate history log or just rely on the updated state.
-    // For "undo" or logging, we'd need to store this. 
-    // For now, we update the state.
+    try {
+      this.chess.load(newFen);
+    } catch (e) {
+      console.log("FEN load failed: " + newFen, e);
+      // Revert deck and board?
+      deck.push(piece);
+      this.chess.remove(square); // Ideally restore full previous state
+      return false;
+    }
 
     this.lastMove = { from: '@', to: square }; // Special indicator for summon
     return true;
+
+
   }
 
   private checkStalemate(): boolean {
@@ -208,8 +227,8 @@ export class SummonChessGame {
         for (let c = 0; c < 8; c++) {
           // Optimization: Check only my half?
           // White: Rank 1-4. Black: Rank 5-8.
-          if (turn === 'w' && r > 4) continue;
-          if (turn === 'b' && r < 5) continue;
+          // if (turn === 'w' && r > 4) continue;
+          // if (turn === 'b' && r < 5) continue;
 
           // Pawn restrictions
           if (piece === 'p' && (r === 1 || r === 8)) continue;

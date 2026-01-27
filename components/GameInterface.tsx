@@ -177,10 +177,11 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
   };
 
   const executeAction = async (action: any) => {
+    const playerId = localStorage.getItem('playerId');
     const res = await fetch(`/api/game/${gameId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(action),
+      body: JSON.stringify({ ...action, playerId }),
     });
     if (res.ok) {
       const data = await res.json();
