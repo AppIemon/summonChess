@@ -142,8 +142,8 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
     import('chess.js').then(({ Chess }) => {
       const chess = new Chess(gameState.fen);
 
-      const minRank = turn === 'w' ? 1 : 5;
-      const maxRank = turn === 'w' ? 4 : 8;
+      const minRank = 1;
+      const maxRank = 8;
 
       for (let r = minRank; r <= maxRank; r++) {
         for (let c = 0; c < 8; c++) {
@@ -153,8 +153,7 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
 
           if (!currentPiece) {
             if (piece === 'p') {
-              if (turn === 'w' && r === 1) continue;
-              if (turn === 'b' && r === 8) continue;
+              if (r === 1 || r === 8) continue;
             }
             valid.push(sq);
           }

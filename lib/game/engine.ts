@@ -82,18 +82,9 @@ export class SummonChessGame {
 
     const rank = parseInt(square[1]);
 
-    // White can summon on 1, 2, 3, 4.
-    // Black can summon on 5, 6, 7, 8.
-
-    if (turn === 'w') {
-      if (rank > 4) return false;
-      // Pawn restriction: No rank 1 or 8 (usually 1 for white)
-      // Standard chess: Pawns can't be on 1st rank.
-      if (piece === 'p' && (rank === 1 || rank === 8)) return false;
-    } else {
-      if (rank < 5) return false;
-      // Pawn restriction
-      if (piece === 'p' && (rank === 8 || rank === 1)) return false;
+    // Pawn restriction: No rank 1 or 8
+    if (piece === 'p') {
+      if (rank === 1 || rank === 8) return false;
     }
 
     // Place the piece
@@ -152,36 +143,10 @@ export class SummonChessGame {
 
     if (deck.length === 0) return true; // No pieces to summon -> Stalemate.
 
-    // Check if any valid square exists for any piece in deck.
-    // Optimistic check: are there ANY empty squares in valid area?
-    // White: Rank 1-4. Black: Rank 5-8.
-
-    // Simplistic check: Iterate used squares.
-    // Since board is 8x8, we can just scan valid ranks.
-    // If we find ONE empty square, can we summon?
-    // Yes, unless it's a pawn and the only empty square is Rank 1/8 (which we excluded).
-
-    // Let's refine:
-    // If deck has any non-pawn -> need 1 empty square in valid half.
-    // If deck has only pawns -> need 1 empty square in valid half EXCLUDING First/Last rank.
-
     const hasNonPawn = deck.some(p => p !== 'p');
     const hasPawn = deck.some(p => p === 'p');
 
-    const validRanks = turn === 'w' ? [0, 1, 2, 3] : [4, 5, 6, 7]; // 0-indexed rows (Rank 1 is row 7 in visual, but let's use Rank 1..8 logic)
-    // Chess.js uses Rank 1..8 in squares 'a1'..'h8'.
-
-    for (const r of validRanks) { // 0..3 -> Rank 1..4 ? No.
-      // Rank 1 is '1'. Rank 8 is '8'.
-      // Loop r from 1 to 4 (White) or 5 to 8 (Black).
-      const rankNum = turn === 'w' ? (r + 1) : (r + 1); // wait loop logic above logic needs fix
-    }
-
-    // Correct loop:
-    const minRank = turn === 'w' ? 1 : 5;
-    const maxRank = turn === 'w' ? 4 : 8;
-
-    for (let r = minRank; r <= maxRank; r++) {
+    for (let r = 1; r <= 8; r++) {
       for (let c = 0; c < 8; c++) {
         const file = 'abcdefgh'[c];
         const square = (file + r) as Square;
@@ -190,8 +155,7 @@ export class SummonChessGame {
           if (hasNonPawn) return false; // Can summon non-pawn here.
           if (hasPawn) {
             // Can summon pawn?
-            if (turn === 'w' && r !== 1) return false;
-            if (turn === 'b' && r !== 8) return false;
+            if (r !== 1 && r !== 8) return false;
           }
         }
       }

@@ -7,6 +7,7 @@ import styles from './page.module.css'; // We need to create this or use inline
 export default function Home() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [matchStatus, setMatchStatus] = useState<string>('');
 
   const createGame = async () => {
     setLoading(true);
@@ -16,6 +17,47 @@ export default function Home() {
       router.push(`/game/${data.id}`);
     } catch (e) {
       alert('Failed to create game');
+      setLoading(false);
+    }
+  };
+
+  const findMatch = async () => {
+    setLoading(true);
+    setMatchStatus('Looking for opponent...');
+
+    // Generate random player ID if not exists
+    let playerId = localStorage.getItem('playerId');
+    if (!playerId) {
+      playerId = crypto.randomUUID();
+      localStorage.setItem('playerId', playerId);
+    }
+
+    try {
+      // Join Queue
+      const joinRes = await fetch('/api/match', {
+        method: 'POST',
+        body: JSON.stringify({ playerId }),
+      });
+      const joinData = await joinRes.json();
+
+      if (joinData.status === 'matched') {
+        router.push(`/game/${joinData.gameId}`);
+        return;
+      }
+
+      // Poll
+      const poll = setInterval(async () => {
+        const checkRes = await fetch(`/api/match?playerId=${playerId}`);
+        const checkData = await checkRes.json();
+
+        if (checkData.status === 'matched') {
+          clearInterval(poll);
+          router.push(`/game/${checkData.gameId}`);
+        }
+      }, 1000);
+
+    } catch (e) {
+      setMatchStatus('Error finding match');
       setLoading(false);
     }
   };
@@ -34,20 +76,38 @@ export default function Home() {
         Classic Chess with a twist. Start with only Kings. Summon your army to the battlefield.
       </p>
 
-      <button
-        onClick={createGame}
-        disabled={loading}
-        style={{
-          padding: '15px 30px',
-          fontSize: '1.2rem',
-          background: '#000',
-          color: '#fff',
-          borderRadius: '8px',
-          transition: 'transform 0.1s'
-        }}
-      >
-        {loading ? 'Creating...' : 'Create New Game'}
-      </button>
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <button
+          onClick={createGame}
+          disabled={loading}
+          style={{
+            padding: '15px 30px',
+            fontSize: '1.2rem',
+            background: '#333',
+            color: '#fff',
+            borderRadius: '8px',
+            border: 'none',
+            cursor: 'pointer'
+          }}
+        >
+          Pass & Play
+        </button>
+        <button
+          onClick={findMatch}
+          disabled={loading}
+          style={{
+            padding: '15px 30px',
+            fontSize: '1.2rem',
+            background: '#000',
+            color: '#fff',
+            borderRadius: '8px',
+            border: 'none',
+            cursor: 'pointer'
+          }}
+        >
+          {loading && matchStatus ? matchStatus : 'Find Online Match'}
+        </button>
+      </div>
 
       <div style={{ marginTop: '40px', textAlign: 'center', color: '#888', fontSize: '0.9rem' }}>
         <p>Rules:</p>

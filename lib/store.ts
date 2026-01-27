@@ -5,6 +5,13 @@ import { GameState } from './game/types';
 // In production, replace with Redis/MongoDB.
 const games = new Map<string, SummonChessGame>();
 
+interface QueueEntry {
+  playerId: string;
+  res?: (gameId: string) => void;
+}
+const waitingQueue: string[] = []; // List of playerIds
+const matchedGames = new Map<string, string>(); // playerId -> gameId
+
 export const GameStore = {
   createGame: (id: string) => {
     const game = new SummonChessGame();
@@ -15,7 +22,44 @@ export const GameStore = {
     return games.get(id);
   },
   saveGame: (id: string, game: SummonChessGame) => {
-    // In-memory reference is already updated, but for patterns:
     games.set(id, game);
+  },
+  // Matching
+  joinQueue: (playerId: string): { status: 'queued' | 'matched', gameId?: string } => {
+    if (matchedGames.has(playerId)) {
+      return { status: 'matched', gameId: matchedGames.get(playerId) };
+    }
+
+    // Check if already in queue
+    if (waitingQueue.includes(playerId)) {
+      return { status: 'queued' };
+    }
+
+    // Match with current waiter
+    if (waitingQueue.length > 0) {
+      const opponentId = waitingQueue.shift()!;
+      if (opponentId === playerId) return { status: 'queued' }; // Should not happen
+
+      // Create Game
+      const gameId = crypto.randomUUID(); // Need node 19+ or polyfill. uuidv4 better.
+      // Assume uuid is available or use random string.
+      const game = new SummonChessGame();
+      games.set(gameId, game);
+
+      // Store match info
+      matchedGames.set(playerId, gameId);
+      matchedGames.set(opponentId, gameId); // Opponent will poll and see this
+
+      return { status: 'matched', gameId };
+    } else {
+      waitingQueue.push(playerId);
+      return { status: 'queued' };
+    }
+  },
+  checkStatus: (playerId: string): { status: 'queued' | 'matched', gameId?: string } => {
+    if (matchedGames.has(playerId)) {
+      return { status: 'matched', gameId: matchedGames.get(playerId) };
+    }
+    return { status: 'queued' };
   }
 };
