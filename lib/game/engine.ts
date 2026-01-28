@@ -222,9 +222,9 @@ export class SummonChessGame {
 
     for (const piece of uniquePieces) {
       for (let r = 1; r <= 8; r++) {
-        // Rank restriction: Own half
-        if (turn === 'w' && r > 4) continue;
-        if (turn === 'b' && r < 5) continue;
+        // Rank restriction: Own half - REMOVED per user request
+        // if (turn === 'w' && r > 4) continue;
+        // if (turn === 'b' && r < 5) continue;
 
         // Pawn restriction
         if (piece === 'p' && (r === 1 || r === 8)) continue;

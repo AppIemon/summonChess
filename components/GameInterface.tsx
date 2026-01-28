@@ -9,7 +9,12 @@ import styles from './GameInterface.module.css';
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
-  if (!res.ok) throw new Error('API Error');
+  if (!res.ok) {
+    const error: any = new Error('An error occurred while fetching the data.');
+    error.info = await res.json();
+    error.status = res.status;
+    throw error;
+  }
   return res.json();
 };
 
@@ -50,7 +55,17 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
     }
   }, [gameState?.turn]);
 
-  if (error) return <div>게임을 불러오는데 실패했습니다</div>;
+  if (error) {
+    return (
+      <div className={styles.container} style={{ justifyContent: 'center', height: '100vh' }}>
+        <h2>게임을 찾을 수 없습니다</h2>
+        <p>게임이 종료되었거나 유효하지 않은 링크입니다.</p>
+        <button onClick={() => window.location.href = '/'} style={{ marginTop: '20px', padding: '10px 20px' }}>
+          홈으로 돌아가기
+        </button>
+      </div>
+    );
+  }
   if (!gameState) return <div>로딩 중...</div>;
 
   const handleSquareClick = async (square: string) => {
@@ -155,8 +170,9 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
       const chess = new Chess(gameState.fen);
 
       // Define summonable ranks based on turn
-      const minRank = gameState.turn === 'w' ? 1 : 5;
-      const maxRank = gameState.turn === 'w' ? 4 : 8;
+      // Updated: Allow full board summon
+      const minRank = 1;
+      const maxRank = 8;
 
       for (let r = minRank; r <= maxRank; r++) {
         for (let c = 0; c < 8; c++) {
