@@ -6,9 +6,15 @@ import path from 'path';
 const DATA_DIR = path.join(process.cwd(), '.data');
 const DATA_FILE = path.join(DATA_DIR, 'store.json');
 
-// Ensure data dir exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+// Helper to ensure dir exists
+const ensureDir = () => {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+  } catch (e) {
+    console.error("Failed to ensure data dir", e);
+  }
 }
 
 // Declare global types
@@ -30,9 +36,13 @@ if (process.env.NODE_ENV !== 'production') {
 
 // Persistence Helper
 const persist = () => {
+  ensureDir();
   try {
     const data = {
-      games: Array.from(games.entries()).map(([id, game]) => ({ id, data: game.serialize() })),
+      games: Array.from(games.entries()).map(([id, game]) => ({
+        id,
+        data: (typeof game.serialize === 'function') ? game.serialize() : {}
+      })),
       waitingQueue,
       matchedGames: Array.from(matchedGames.entries())
     };
@@ -44,6 +54,8 @@ const persist = () => {
 
 const load = () => {
   if (games.size > 0) return; // Already in memory
+
+  ensureDir();
   if (fs.existsSync(DATA_FILE)) {
     try {
       const raw = fs.readFileSync(DATA_FILE, 'utf-8');

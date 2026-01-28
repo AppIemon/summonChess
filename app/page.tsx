@@ -26,9 +26,19 @@ export default function Home() {
       // Join Queue
       const joinRes = await fetch('/api/match', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({ playerId }),
       });
+
+      if (!joinRes.ok) {
+        console.error("Match join failed", joinRes.status);
+        throw new Error("Match join failed");
+      }
+
       const joinData = await joinRes.json();
+      console.log("Join Data:", joinData);
 
       if (joinData.status === 'matched') {
         router.push(`/game/${joinData.gameId}`);
@@ -37,18 +47,26 @@ export default function Home() {
 
       // Poll
       const poll = setInterval(async () => {
-        const checkRes = await fetch(`/api/match?playerId=${playerId}`);
-        const checkData = await checkRes.json();
+        try {
+          const checkRes = await fetch(`/api/match?playerId=${playerId}`);
+          if (!checkRes.ok) throw new Error("Poll failed");
+          const checkData = await checkRes.json();
 
-        if (checkData.status === 'matched') {
-          clearInterval(poll);
-          router.push(`/game/${checkData.gameId}`);
+          if (checkData.status === 'matched') {
+            clearInterval(poll);
+            router.push(`/game/${checkData.gameId}`);
+          }
+        } catch (pollErr) {
+          console.error("Poll error", pollErr);
+          // Don't stop polling immediately on transient error, but could fail eventually
         }
       }, 1000);
 
     } catch (e) {
+      console.error(e);
       setMatchStatus('매칭 찾기 오류');
       setLoading(false);
+      alert("매칭 중 오류가 발생했습니다.");
     }
   };
 
