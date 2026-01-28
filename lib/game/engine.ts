@@ -85,11 +85,14 @@ export class SummonChessGame {
             return { success: false, error: "Not a player" };
           }
         } else {
-          if (turn === 'w' && this.whitePlayerId && effectivePlayerId !== this.whitePlayerId) {
-            return { success: false, error: `Not White's turn (ID mismatch)` };
-          }
-          if (turn === 'b' && this.blackPlayerId && effectivePlayerId !== this.blackPlayerId) {
-            return { success: false, error: `Not Black's turn (ID mismatch)` };
+          if (turn === 'w') {
+            if (this.whitePlayerId && effectivePlayerId !== this.whitePlayerId) {
+              return { success: false, error: `Not White's turn (ID mismatch)` };
+            }
+          } else if (turn === 'b') {
+            if (this.blackPlayerId && effectivePlayerId !== this.blackPlayerId) {
+              return { success: false, error: `Not Black's turn (ID mismatch)` };
+            }
           }
         }
       }
@@ -299,5 +302,29 @@ export class SummonChessGame {
       return this.chess.turn() === 'w' ? 'b' : 'w';
     }
     return null;
+  }
+  public serialize(): any {
+    return {
+      fen: this.chess.fen(),
+      whiteDeck: this.whiteDeck,
+      blackDeck: this.blackDeck,
+      whitePlayerId: this.whitePlayerId,
+      blackPlayerId: this.blackPlayerId,
+      resignedBy: this.resignedBy,
+    };
+  }
+
+  static deserialize(data: any): SummonChessGame {
+    const game = new SummonChessGame(
+      data.fen,
+      data.whiteDeck,
+      data.blackDeck,
+      data.whitePlayerId,
+      data.blackPlayerId
+    );
+    if (data.resignedBy) {
+      game.resignedBy = data.resignedBy;
+    }
+    return game;
   }
 }
