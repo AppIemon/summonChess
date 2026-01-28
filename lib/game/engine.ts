@@ -9,14 +9,20 @@ export class SummonChessGame {
 
   private whitePlayerId?: string;
   private blackPlayerId?: string;
+  private resignedBy?: PieceColor;
 
   constructor(fen?: string, whiteDeck?: PieceType[], blackDeck?: PieceType[], whitePlayerId?: string, blackPlayerId?: string) {
-    // Default setup: Kings only.
-    // 4k3/8/8/8/8/8/8/4K3 w - - 0 1
-    this.chess = new Chess(fen || '4k3/8/8/8/8/8/8/4K3 w - - 0 1');
+    // Default setup: Kings and one pawn in front.
+    // White: King e1, Pawn e2.
+    // Black: King e8, Pawn e7.
+    // FEN: 4k3/4p3/8/8/8/8/4P3/4K3 w - - 0 1
+    this.chess = new Chess(fen || '4k3/4p3/8/8/8/8/4P3/4K3 w - - 0 1');
 
     // Default Deck: 1 Queen, 2 Rooks, 2 Bishops, 2 Knights, 8 Pawns
-    const defaultDeck: PieceType[] = ['q', 'r', 'r', 'b', 'b', 'n', 'n', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'];
+    // Since we start with 1 pawn on board, we reduce deck pawns to 7?
+    // User request: "Start with pawn in front of king". Usually implies these are the starting pieces.
+    // I will reduce the default pawn count by 1 (total 7 pawns in deck).
+    const defaultDeck: PieceType[] = ['q', 'r', 'r', 'b', 'b', 'n', 'n', 'p', 'p', 'p', 'p', 'p', 'p', 'p'];
     this.whiteDeck = whiteDeck ? [...whiteDeck] : [...defaultDeck];
     this.blackDeck = blackDeck ? [...blackDeck] : [...defaultDeck];
     this.whitePlayerId = whitePlayerId;
@@ -59,10 +65,33 @@ export class SummonChessGame {
     // Validate Player
     if (effectivePlayerId) {
       if (turn === 'w' && this.whitePlayerId && effectivePlayerId !== this.whitePlayerId) {
-        return { success: false, error: `Not White's turn (ID mismatch)` };
-      }
-      if (turn === 'b' && this.blackPlayerId && effectivePlayerId !== this.blackPlayerId) {
-        return { success: false, error: `Not Black's turn (ID mismatch)` };
+        // Allow resign out of turn? Usually resign is allowed anytime or mainly on turn. 
+        // But preventing abuse, usually only on turn or strict player check.
+        // Let's strictly enforce player check but allow resign anytime?
+        // Actually, turn based games usually require action on turn.
+        // But resign is special.
+        // Let's stick to turn-based for now to avoid complexity, or allow if it matches *any* player ID.
+
+        // For resign, we want to allow the *current* player to resign, or the *waiting* player?
+        // If I am white, and it is black's turn, can I resign? Yes.
+        // So checking "turn" against "playerId" is wrong for resign.
+
+        if (action.type === 'resign') {
+          if (effectivePlayerId === this.whitePlayerId) {
+            // White resigns
+          } else if (effectivePlayerId === this.blackPlayerId) {
+            // Black resigns
+          } else {
+            return { success: false, error: "Not a player" };
+          }
+        } else {
+          if (turn === 'w' && this.whitePlayerId && effectivePlayerId !== this.whitePlayerId) {
+            return { success: false, error: `Not White's turn (ID mismatch)` };
+          }
+          if (turn === 'b' && this.blackPlayerId && effectivePlayerId !== this.blackPlayerId) {
+            return { success: false, error: `Not Black's turn (ID mismatch)` };
+          }
+        }
       }
     } else {
       console.log("Warning: No playerId provided for action");
@@ -85,6 +114,16 @@ export class SummonChessGame {
       return { success: false, error: "Invalid move" };
     } else if (action.type === 'summon') {
       return this.summonPiece(action.piece, action.square as Square);
+    } else if (action.type === 'resign') {
+      // Determine who resigned
+      // If playerId is provided, usage it.
+      // If not, assume current turn player? (Unsafe)
+      // With effectivePlayerId check above:
+      if (effectivePlayerId === this.whitePlayerId) this.resignedBy = 'w';
+      else if (effectivePlayerId === this.blackPlayerId) this.resignedBy = 'b';
+      else this.resignedBy = turn; // Fallback to current turn if no ID (local testing)
+
+      return { success: true };
     }
     return { success: false, error: "Unknown action type" };
   }
@@ -151,6 +190,7 @@ export class SummonChessGame {
   }
 
   private checkStalemate(): boolean {
+    if (this.resignedBy) return false;
     if (this.chess.inCheck()) return false; // Cannot be stalemate if in check
     if (this.chess.moves().length > 0) return false; // Have board moves
 
@@ -178,6 +218,7 @@ export class SummonChessGame {
   }
 
   private checkGameOver(): boolean {
+    if (this.resignedBy) return true;
     if (this.isTrueCheckmate()) return true;
     if (this.checkStalemate()) return true;
 
@@ -193,6 +234,7 @@ export class SummonChessGame {
   }
 
   private isTrueCheckmate(): boolean {
+    if (this.resignedBy) return false;
     if (!this.chess.isCheckmate()) return false;
     // Standard checkmate is true (no moves). Check if summons can save.
     return !this.canSummonToEscape();
@@ -250,6 +292,9 @@ export class SummonChessGame {
   }
 
   private getWinner(): PieceColor | null {
+    if (this.resignedBy) {
+      return this.resignedBy === 'w' ? 'b' : 'w';
+    }
     if (this.isTrueCheckmate()) {
       return this.chess.turn() === 'w' ? 'b' : 'w';
     }

@@ -215,6 +215,11 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
     }
   };
 
+  const handleResign = async () => {
+    if (!confirm('정말 기권하시겠습니까?')) return;
+    await executeAction({ type: 'resign' });
+  };
+
   return (
     <div className={styles.container}>
       <div className={styles.header}>
@@ -224,6 +229,7 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
           {gameState.isCheck && <span className={styles.check}> 체크!</span>}
           {gameState.isCheckmate && <span className={styles.mate}> 체크메이트! 승자: {gameState.winner === 'w' ? '백' : '흑'}</span>}
           {gameState.isStalemate && <span className={styles.draw}> 스테일메이트</span>}
+          {gameState.winner && !gameState.isCheckmate && <span className={styles.mate}> 승자: {gameState.winner === 'w' ? '백' : '흑'} (기권)</span>}
         </div>
       </div>
 
@@ -262,6 +268,7 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
         <button onClick={() => setMyColor(myColor === 'w' ? 'b' : 'w')}>보드 뒤집기</button>
         <button onClick={() => navigator.clipboard.writeText(window.location.href)}>링크 공유</button>
         <button onClick={() => alert('가이드:\n- 턴마다 이동 또는 소환.\n- 자신의 진영에 소환.\n- 체크메이트로 승리.')}>도움말</button>
+        <button onClick={handleResign} style={{ backgroundColor: '#ff4444', color: 'white' }}>기권</button>
       </div>
     </div>
   );

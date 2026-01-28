@@ -35,4 +35,8 @@ export interface SummonAction {
   square: string;
 }
 
-export type Action = MoveAction | SummonAction;
+export interface ResignAction {
+  type: 'resign';
+}
+
+export type Action = MoveAction | SummonAction | ResignAction;
