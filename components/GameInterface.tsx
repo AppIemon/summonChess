@@ -190,7 +190,12 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
       setSelectedHandPiece(null);
       setValidTargetSquares([]);
     } else {
-      alert('유효하지 않은 이동입니다');
+      try {
+        const errData = await res.json();
+        alert(errData.error || '유효하지 않은 이동입니다');
+      } catch (e) {
+        alert('유효하지 않은 이동입니다');
+      }
     }
   };
 

@@ -29,13 +29,13 @@ export async function POST(
 
   try {
     const action: Action = await request.json();
-    const success = game.executeAction(action);
+    const result = game.executeAction(action);
 
-    if (success) {
+    if (result.success) {
       GameStore.saveGame(id, game);
       return NextResponse.json({ success: true, state: game.getState() });
     } else {
-      return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 });
+      return NextResponse.json({ success: false, error: result.error || 'Invalid action' }, { status: 400 });
     }
   } catch (e) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });

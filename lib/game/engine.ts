@@ -48,10 +48,9 @@ export class SummonChessGame {
   }
 
 
-  public executeAction(action: Action & { playerId?: string }, playerId?: string): boolean {
+  public executeAction(action: Action & { playerId?: string }, playerId?: string): { success: boolean, error?: string } {
     if (this.checkGameOver()) {
-      console.log("Action rejected: Game Over");
-      return false;
+      return { success: false, error: "Game Over" };
     }
 
     const turn = this.chess.turn();
@@ -60,12 +59,10 @@ export class SummonChessGame {
     // Validate Player
     if (effectivePlayerId) {
       if (turn === 'w' && this.whitePlayerId && effectivePlayerId !== this.whitePlayerId) {
-        console.log(`Action rejected: Not White's turn. Current Turn: ${turn}, Req ID: ${effectivePlayerId}, White ID: ${this.whitePlayerId}`);
-        return false;
+        return { success: false, error: `Not White's turn (ID mismatch)` };
       }
       if (turn === 'b' && this.blackPlayerId && effectivePlayerId !== this.blackPlayerId) {
-        console.log(`Action rejected: Not Black's turn. Current Turn: ${turn}, Req ID: ${effectivePlayerId}, Black ID: ${this.blackPlayerId}`);
-        return false;
+        return { success: false, error: `Not Black's turn (ID mismatch)` };
       }
     } else {
       console.log("Warning: No playerId provided for action");
@@ -80,50 +77,49 @@ export class SummonChessGame {
         });
         if (move) {
           this.lastMove = { from: move.from, to: move.to };
-          return true;
+          return { success: true };
         }
       } catch (e) {
-        return false;
+        return { success: false, error: "Invalid move rule" };
       }
+      return { success: false, error: "Invalid move" };
     } else if (action.type === 'summon') {
       return this.summonPiece(action.piece, action.square as Square);
     }
-    return false;
+    return { success: false, error: "Unknown action type" };
   }
 
-  private summonPiece(piece: PieceType, square: Square): boolean {
+  private summonPiece(piece: PieceType, square: Square): { success: boolean, error?: string } {
     const turn = this.chess.turn();
     const deck = turn === 'w' ? this.whiteDeck : this.blackDeck;
 
     // Check if piece is in deck
     const pieceIndex = deck.indexOf(piece);
-    if (pieceIndex === -1) return false;
+    if (pieceIndex === -1) return { success: false, error: "Piece not in deck" };
 
     // Check if square is empty
-    if (this.chess.get(square)) return false;
+    if (this.chess.get(square)) return { success: false, error: "Square occupied" };
 
     // Validate placement rules
     const rank = parseInt(square[1]);
 
     // Rank restriction: Own half
-    if (turn === 'w' && rank > 4) return false;
-    if (turn === 'b' && rank < 5) return false;
+    if (turn === 'w' && rank > 4) return { success: false, error: "Must summon in ranks 1-4" };
+    if (turn === 'b' && rank < 5) return { success: false, error: "Must summon in ranks 5-8" };
 
     // Pawn restriction: No rank 1 or 8
-    if (piece === 'p' && (rank === 1 || rank === 8)) return false;
+    if (piece === 'p' && (rank === 1 || rank === 8)) return { success: false, error: "Pawns cannot be summoned on rank 1 or 8" };
 
     // Place the piece
     const success = this.chess.put({ type: piece, color: turn }, square);
     if (!success) {
-      console.log("Put failed");
-      return false;
+      return { success: false, error: "Placement failed (internal)" };
     }
 
     // Check if we are checking ourselves (Self-check)
     if (this.chess.inCheck()) {
-      console.log("Self check prevented");
       this.chess.remove(square); // Revert
-      return false;
+      return { success: false, error: "Cannot summon: results in self-check" };
     }
 
     // Remove from deck
@@ -134,7 +130,7 @@ export class SummonChessGame {
     const parts = fen.split(' ');
     parts[1] = parts[1] === 'w' ? 'b' : 'w';
     parts[3] = '-';
-    parts[4] = '0'; // Reset halfmove clock on summon? Standard chess resets on pawn/capture. 
+    parts[4] = '0';
     // Let's reset it to keep the game alive.
 
     if (turn === 'b') {
@@ -145,14 +141,13 @@ export class SummonChessGame {
     try {
       this.chess.load(newFen);
     } catch (e) {
-      console.log("FEN load failed: " + newFen, e);
       deck.push(piece);
       this.chess.remove(square);
-      return false;
+      return { success: false, error: "FEN invalid update" };
     }
 
     this.lastMove = { from: '@', to: square };
-    return true;
+    return { success: true };
   }
 
   private checkStalemate(): boolean {
