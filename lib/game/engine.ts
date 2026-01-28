@@ -103,9 +103,9 @@ export class SummonChessGame {
     // Validate placement rules
     const rank = parseInt(square[1]);
 
-    // Rank restriction: Own half
-    if (turn === 'w' && rank > 4) return { success: false, error: "Must summon in ranks 1-4" };
-    if (turn === 'b' && rank < 5) return { success: false, error: "Must summon in ranks 5-8" };
+    // Rank restriction: Own half - REMOVED per user request
+    // if (turn === 'w' && rank > 4) return { success: false, error: "Must summon in ranks 1-4" };
+    // if (turn === 'b' && rank < 5) return { success: false, error: "Must summon in ranks 5-8" };
 
     // Pawn restriction: No rank 1 or 8
     if (piece === 'p' && (rank === 1 || rank === 8)) return { success: false, error: "Pawns cannot be summoned on rank 1 or 8" };
