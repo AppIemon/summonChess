@@ -157,20 +157,15 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
     setSelectedHandPiece(piece);
     setSelectedSquare(null);
 
-    // Calculate valid summon squares
-    // Logic from Engine:
-    // White: Rank 1-4. Black: Rank 5-8.
-    // Empty squares.
-    // Pawns: Not 1 or 8.
-
     const turn = gameState.turn;
     const valid: string[] = [];
 
-    import('chess.js').then(({ Chess }) => {
+    Promise.all([
+      import('chess.js'),
+      import('@/lib/game/engine')
+    ]).then(([{ Chess }, { isReachableByOwnPiece }]) => {
       const chess = new Chess(gameState.fen);
 
-      // Define summonable ranks based on turn
-      // Updated: Allow full board summon
       const minRank = 1;
       const maxRank = 8;
 
@@ -181,6 +176,12 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
           const currentPiece = chess.get(sq as any);
 
           if (!currentPiece) {
+            // Check reachability
+            if (!isReachableByOwnPiece(chess, sq as any, turn)) {
+              continue;
+            }
+
+            // Pawn restriction
             if (piece === 'p') {
               if (r === 1 || r === 8) continue;
             }

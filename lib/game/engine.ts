@@ -336,83 +336,80 @@ export class SummonChessGame {
     return game;
   }
 
-  private isReachableByOwnPiece(target: Square, color: PieceColor): boolean {
-    // Parse target
-    const targetFile = target.charCodeAt(0) - 'a'.charCodeAt(0);
-    const targetRank = parseInt(target[1]) - 1; // 0-7
+  public isReachableByOwnPiece(target: Square, color: PieceColor): boolean {
+    return isReachableByOwnPiece(this.chess, target, color);
+  }
+}
 
-    for (let r = 0; r < 8; r++) {
-      for (let c = 0; c < 8; c++) {
-        const fileChar = String.fromCharCode('a'.charCodeAt(0) + c);
-        const rankNum = r + 1;
-        const sq = (fileChar + rankNum) as Square;
-        const piece = this.chess.get(sq);
+export function isReachableByOwnPiece(chess: Chess, target: Square, color: PieceColor): boolean {
+  // Parse target
+  const targetFile = target.charCodeAt(0) - 'a'.charCodeAt(0);
+  const targetRank = parseInt(target[1]) - 1; // 0-7
 
-        if (!piece || piece.color !== color) continue;
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const fileChar = String.fromCharCode('a'.charCodeAt(0) + c);
+      const rankNum = r + 1;
+      const sq = (fileChar + rankNum) as Square;
+      const piece = chess.get(sq);
 
-        if (this.canPieceReach(piece.type, c, r, targetFile, targetRank, piece.color as PieceColor)) {
-          return true;
-        }
+      if (!piece || piece.color !== color) continue;
+
+      if (canPieceReach(chess, piece.type, c, r, targetFile, targetRank, piece.color as PieceColor)) {
+        return true;
       }
     }
-    return false;
   }
+  return false;
+}
 
-  private canPieceReach(type: string, fromX: number, fromY: number, toX: number, toY: number, color: PieceColor): boolean {
-    const dx = toX - fromX;
-    const dy = toY - fromY;
+export function canPieceReach(chess: Chess, type: string, fromX: number, fromY: number, toX: number, toY: number, color: PieceColor): boolean {
+  const dx = toX - fromX;
+  const dy = toY - fromY;
 
-    if (dx === 0 && dy === 0) return false;
+  if (dx === 0 && dy === 0) return false;
 
-    switch (type) {
-      case 'p':
-        // Pawn: Forward 1 or 2. Strictly move to empty square (no diagonal attacks).
-        const direction = color === 'w' ? 1 : -1;
-        const startRank = color === 'w' ? 1 : 6;
+  switch (type) {
+    case 'p':
+      // Pawn (Summoning criteria): Forward 1 or Diagonal 1. Total 3 squares.
+      const direction = color === 'w' ? 1 : -1;
+      // const startRank = color === 'w' ? 1 : 6;
 
-        // Forward 1
-        if (dx === 0 && dy === direction) return true;
-        // Forward 2
-        if (dx === 0 && dy === 2 * direction && fromY === startRank) {
-          // Check obstruction at mid point
-          const midY = fromY + direction;
-          const midFile = String.fromCharCode('a'.charCodeAt(0) + fromX);
-          const midSq = (midFile + (midY + 1)) as Square;
-          if (!this.chess.get(midSq)) return true;
-        }
-        return false;
-      case 'n':
-        return (Math.abs(dx) === 2 && Math.abs(dy) === 1) || (Math.abs(dx) === 1 && Math.abs(dy) === 2);
-      case 'k':
-        return Math.abs(dx) <= 1 && Math.abs(dy) <= 1;
-      case 'b':
-        if (Math.abs(dx) !== Math.abs(dy)) return false;
-        return this.isPathClear(fromX, fromY, toX, toY);
-      case 'r':
-        if (dx !== 0 && dy !== 0) return false;
-        return this.isPathClear(fromX, fromY, toX, toY);
-      case 'q':
-        if (dx !== 0 && dy !== 0 && Math.abs(dx) !== Math.abs(dy)) return false;
-        return this.isPathClear(fromX, fromY, toX, toY);
-    }
-    return false;
+      // Allow forward or diagonal (dx -1, 0, 1) but only 1 step forward (dy === direction)
+      if (Math.abs(dx) <= 1 && dy === direction) return true;
+
+      return false;
+    case 'n':
+      return (Math.abs(dx) === 2 && Math.abs(dy) === 1) || (Math.abs(dx) === 1 && Math.abs(dy) === 2);
+    case 'k':
+      return Math.abs(dx) <= 1 && Math.abs(dy) <= 1;
+    case 'b':
+      if (Math.abs(dx) !== Math.abs(dy)) return false;
+      return isPathClear(chess, fromX, fromY, toX, toY);
+    case 'r':
+      if (dx !== 0 && dy !== 0) return false;
+      return isPathClear(chess, fromX, fromY, toX, toY);
+    case 'q':
+      if (dx !== 0 && dy !== 0 && Math.abs(dx) !== Math.abs(dy)) return false;
+      return isPathClear(chess, fromX, fromY, toX, toY);
   }
+  return false;
+}
 
-  private isPathClear(fromX: number, fromY: number, toX: number, toY: number): boolean {
-    const stepX = Math.sign(toX - fromX);
-    const stepY = Math.sign(toY - fromY);
+export function isPathClear(chess: Chess, fromX: number, fromY: number, toX: number, toY: number): boolean {
+  const stepX = Math.sign(toX - fromX);
+  const stepY = Math.sign(toY - fromY);
 
-    let currX = fromX + stepX;
-    let currY = fromY + stepY;
+  let currX = fromX + stepX;
+  let currY = fromY + stepY;
 
-    while (currX !== toX || currY !== toY) {
-      const fileChar = String.fromCharCode('a'.charCodeAt(0) + currX);
-      const rankNum = currY + 1;
-      const sq = (fileChar + rankNum) as Square;
-      if (this.chess.get(sq)) return false;
-      currX += stepX;
-      currY += stepY;
-    }
-    return true;
+  while (currX !== toX || currY !== toY) {
+    const fileChar = String.fromCharCode('a'.charCodeAt(0) + currX);
+    const rankNum = currY + 1;
+    const sq = (fileChar + rankNum) as Square;
+    if (chess.get(sq)) return false;
+    currX += stepX;
+    currY += stepY;
   }
+  return true;
 }
