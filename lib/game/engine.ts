@@ -24,6 +24,8 @@ export class SummonChessGame {
   }
 
   public getState(): GameState {
+    const isDraw = (this.whiteDeck.length === 0 && this.blackDeck.length === 0) ? this.chess.isDraw() : this.chess.isThreefoldRepetition();
+
     return {
       fen: this.chess.fen(),
       turn: this.chess.turn(),
@@ -31,7 +33,7 @@ export class SummonChessGame {
       blackDeck: [...this.blackDeck],
       isCheck: this.chess.inCheck(),
       isCheckmate: this.isTrueCheckmate(),
-      isDraw: this.chess.isDraw(), // Note: logic might be overridden
+      isDraw: isDraw,
       isStalemate: this.checkStalemate(),
       winner: this.getWinner(),
       history: this.chess.history(),
@@ -46,22 +48,23 @@ export class SummonChessGame {
   }
 
 
-  public executeAction(action: Action, playerId?: string): boolean {
+  public executeAction(action: Action & { playerId?: string }, playerId?: string): boolean {
     if (this.checkGameOver()) {
       console.log("Action rejected: Game Over");
       return false;
     }
 
     const turn = this.chess.turn();
+    const effectivePlayerId = playerId || action.playerId;
 
     // Validate Player
-    if (playerId) {
-      if (turn === 'w' && this.whitePlayerId && playerId !== this.whitePlayerId) {
-        console.log(`Action rejected: Not White's turn. Current Turn: ${turn}, Req ID: ${playerId}, White ID: ${this.whitePlayerId}`);
+    if (effectivePlayerId) {
+      if (turn === 'w' && this.whitePlayerId && effectivePlayerId !== this.whitePlayerId) {
+        console.log(`Action rejected: Not White's turn. Current Turn: ${turn}, Req ID: ${effectivePlayerId}, White ID: ${this.whitePlayerId}`);
         return false;
       }
-      if (turn === 'b' && this.blackPlayerId && playerId !== this.blackPlayerId) {
-        console.log(`Action rejected: Not Black's turn. Current Turn: ${turn}, Req ID: ${playerId}, Black ID: ${this.blackPlayerId}`);
+      if (turn === 'b' && this.blackPlayerId && effectivePlayerId !== this.blackPlayerId) {
+        console.log(`Action rejected: Not Black's turn. Current Turn: ${turn}, Req ID: ${effectivePlayerId}, Black ID: ${this.blackPlayerId}`);
         return false;
       }
     } else {
@@ -102,17 +105,14 @@ export class SummonChessGame {
     // Validate placement rules
     const rank = parseInt(square[1]);
 
+    // Rank restriction: Own half
+    if (turn === 'w' && rank > 4) return false;
+    if (turn === 'b' && rank < 5) return false;
+
     // Pawn restriction: No rank 1 or 8
-    if (piece === 'p') {
-      if (rank === 1 || rank === 8) return false;
-    }
+    if (piece === 'p' && (rank === 1 || rank === 8)) return false;
 
     // Place the piece
-    // Chess.js doesn't have a direct "put" method that records history cleanly for games, 
-    // but `put` exists. However, `put` doesn't change turn or record history.
-    // To record history, we might need to hack it or just accept it's a custom move.
-
-    // Temporarily place the piece to check legality
     const success = this.chess.put({ type: piece, color: turn }, square);
     if (!success) {
       console.log("Put failed");
@@ -129,14 +129,14 @@ export class SummonChessGame {
     // Remove from deck
     deck.splice(pieceIndex, 1);
 
-    // Switch turn manually since put doesn't do it
+    // Switch turn manually
     const fen = this.chess.fen();
     const parts = fen.split(' ');
-    parts[1] = parts[1] === 'w' ? 'b' : 'w'; // Switch turn
-    parts[3] = '-'; // En passant
-    parts[4] = '0'; // Halfmove reset?
+    parts[1] = parts[1] === 'w' ? 'b' : 'w';
+    parts[3] = '-';
+    parts[4] = '0'; // Reset halfmove clock on summon? Standard chess resets on pawn/capture. 
+    // Let's reset it to keep the game alive.
 
-    // Fullmove number
     if (turn === 'b') {
       parts[5] = (parseInt(parts[5]) + 1).toString();
     }
@@ -146,26 +146,20 @@ export class SummonChessGame {
       this.chess.load(newFen);
     } catch (e) {
       console.log("FEN load failed: " + newFen, e);
-      // Revert deck and board?
       deck.push(piece);
-      this.chess.remove(square); // Ideally restore full previous state
+      this.chess.remove(square);
       return false;
     }
 
-    this.lastMove = { from: '@', to: square }; // Special indicator for summon
+    this.lastMove = { from: '@', to: square };
     return true;
-
-
   }
 
   private checkStalemate(): boolean {
-    if (this.chess.isCheckmate()) return false;
+    if (this.chess.inCheck()) return false; // Cannot be stalemate if in check
+    if (this.chess.moves().length > 0) return false; // Have board moves
 
-    // If standard stalemate is FALSE, then we have moves, so not stalemate.
-    if (!this.chess.isStalemate()) return false;
-
-    // If standard stalemate is TRUE, we have no board moves.
-    // But can we summon?
+    // No board moves. Check if summons can save.
     const turn = this.chess.turn();
     const deck = turn === 'w' ? this.whiteDeck : this.blackDeck;
 
@@ -179,12 +173,8 @@ export class SummonChessGame {
         const file = 'abcdefgh'[c];
         const square = (file + r) as Square;
         if (!this.chess.get(square)) {
-          // Empty!
-          if (hasNonPawn) return false; // Can summon non-pawn here.
-          if (hasPawn) {
-            // Can summon pawn?
-            if (r !== 1 && r !== 8) return false;
-          }
+          if (hasNonPawn) return false;
+          if (hasPawn && r !== 1 && r !== 8) return false;
         }
       }
     }
@@ -193,7 +183,18 @@ export class SummonChessGame {
   }
 
   private checkGameOver(): boolean {
-    return this.isTrueCheckmate() || (this.checkStalemate()) || this.chess.isDraw();
+    if (this.isTrueCheckmate()) return true;
+    if (this.checkStalemate()) return true;
+
+    // Custom draw check
+    if (this.chess.isThreefoldRepetition()) return true;
+
+    // Only allow "Insufficient Material" if decks are empty
+    if (this.whiteDeck.length === 0 && this.blackDeck.length === 0) {
+      if (this.chess.isDraw()) return true;
+    }
+
+    return false;
   }
 
   private isTrueCheckmate(): boolean {
@@ -226,15 +227,14 @@ export class SummonChessGame {
 
     for (const piece of uniquePieces) {
       for (let r = 1; r <= 8; r++) {
+        // Rank restriction: Own half
+        if (turn === 'w' && r > 4) continue;
+        if (turn === 'b' && r < 5) continue;
+
+        // Pawn restriction
+        if (piece === 'p' && (r === 1 || r === 8)) continue;
+
         for (let c = 0; c < 8; c++) {
-          // Optimization: Check only my half? NO, restriction removed.
-          // White: Rank 1-4. Black: Rank 5-8.
-          // if (turn === 'w' && r > 4) continue;
-          // if (turn === 'b' && r < 5) continue;
-
-          // Pawn restrictions
-          if (piece === 'p' && (r === 1 || r === 8)) continue;
-
           const file = 'abcdefgh'[c];
           const square = (file + r) as Square;
 
