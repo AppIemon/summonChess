@@ -18,10 +18,7 @@ export class SummonChessGame {
   private isTimeout: boolean = false;
 
   constructor(fen?: string, whiteDeck?: PieceType[], blackDeck?: PieceType[], whitePlayerId?: string, blackPlayerId?: string) {
-    // Default setup: Kings only (no pawns)
     this.chess = new Chess(fen || '4k3/8/8/8/8/8/8/4K3 w - - 0 1');
-
-    // Default Deck: 1 Queen, 2 Rooks, 2 Bishops, 2 Knights, 8 Pawns
     const defaultDeck: PieceType[] = ['q', 'r', 'r', 'b', 'b', 'n', 'n', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'];
     this.whiteDeck = whiteDeck ? [...whiteDeck] : [...defaultDeck];
     this.blackDeck = blackDeck ? [...blackDeck] : [...defaultDeck];
@@ -31,7 +28,25 @@ export class SummonChessGame {
   }
 
   public getState(): GameState {
+    const isGameOver = this.checkGameOver();
     const isDraw = (this.whiteDeck.length === 0 && this.blackDeck.length === 0) ? this.chess.isDraw() : this.chess.isThreefoldRepetition();
+
+    // Calculate actual time remaining since last action
+    let currentWhiteTime = this.whiteTime;
+    let currentBlackTime = this.blackTime;
+    let currentIsTimeout = this.isTimeout;
+
+    if (!isGameOver) {
+      const now = Date.now();
+      const elapsed = (now - this.lastActionTimestamp) / 1000;
+      if (this.chess.turn() === 'w') {
+        currentWhiteTime = Math.max(0, this.whiteTime - elapsed);
+        if (currentWhiteTime <= 0) currentIsTimeout = true;
+      } else {
+        currentBlackTime = Math.max(0, this.blackTime - elapsed);
+        if (currentBlackTime <= 0) currentIsTimeout = true;
+      }
+    }
 
     return {
       fen: this.chess.fen(),
@@ -42,16 +57,23 @@ export class SummonChessGame {
       isCheckmate: this.isTrueCheckmate(),
       isDraw: isDraw,
       isStalemate: this.checkStalemate(),
-      winner: this.getWinner(),
+      winner: this.calculateWinner(currentIsTimeout, currentWhiteTime, currentBlackTime),
       history: this.chess.history(),
       lastMove: this.lastMove,
       whitePlayerId: this.whitePlayerId,
       blackPlayerId: this.blackPlayerId,
-      whiteTime: Math.max(0, this.whiteTime),
-      blackTime: Math.max(0, this.blackTime),
-      isTimeout: this.isTimeout,
+      whiteTime: Math.floor(currentWhiteTime),
+      blackTime: Math.floor(currentBlackTime),
+      isTimeout: currentIsTimeout,
       chat: [...this.chat],
     };
+  }
+
+  private calculateWinner(isTimeout: boolean, whiteTime: number, blackTime: number): PieceColor | null {
+    if (this.resignedBy) return this.resignedBy === 'w' ? 'b' : 'w';
+    if (isTimeout) return whiteTime <= 0 ? 'b' : 'w';
+    if (this.isTrueCheckmate()) return this.chess.turn() === 'w' ? 'b' : 'w';
+    return null;
   }
 
   public getValidMoves(square: Square) {
@@ -62,7 +84,6 @@ export class SummonChessGame {
     const turn = this.chess.turn();
     const effectivePlayerId = playerId || action.playerId;
 
-    // Chat is special: does not consume time or require turn
     if (action.type === 'chat') {
       this.chat.push({
         id: Math.random().toString(36).substr(2, 9),
@@ -75,35 +96,29 @@ export class SummonChessGame {
       return { success: true };
     }
 
-    if (this.checkGameOver()) {
-      return { success: false, error: "Game Over" };
-    }
+    if (this.checkGameOver()) return { success: false, error: "Game Over" };
 
-    // Update time before action
     const now = Date.now();
     const elapsed = (now - this.lastActionTimestamp) / 1000;
+
+    // Official timer update on action
+    if (turn === 'w') {
+      this.whiteTime = Math.max(0, this.whiteTime - elapsed);
+      if (this.whiteTime <= 0) this.isTimeout = true;
+    } else {
+      this.blackTime = Math.max(0, this.blackTime - elapsed);
+      if (this.blackTime <= 0) this.isTimeout = true;
+    }
     this.lastActionTimestamp = now;
 
-    if (turn === 'w') {
-      this.whiteTime -= elapsed;
-      if (this.whiteTime <= 0) {
-        this.whiteTime = 0;
-        this.isTimeout = true;
-      }
-    } else {
-      this.blackTime -= elapsed;
-      if (this.blackTime <= 0) {
-        this.blackTime = 0;
-        this.isTimeout = true;
-      }
-    }
+    if (this.isTimeout) return { success: false, error: "Time out" };
 
-    // Validate Player
+    // Player validation
     if (effectivePlayerId) {
       if (turn === 'w' && this.whitePlayerId && effectivePlayerId !== this.whitePlayerId && action.type !== 'resign') {
-        return { success: false, error: `Not White's turn (ID mismatch)` };
+        return { success: false, error: `Not White's turn` };
       } else if (turn === 'b' && this.blackPlayerId && effectivePlayerId !== this.blackPlayerId && action.type !== 'resign') {
-        return { success: false, error: `Not Black's turn (ID mismatch)` };
+        return { success: false, error: `Not Black's turn` };
       }
     }
 
@@ -119,9 +134,8 @@ export class SummonChessGame {
           return { success: true };
         }
       } catch (e) {
-        return { success: false, error: "Invalid move rule" };
+        return { success: false, error: "Invalid move" };
       }
-      return { success: false, error: "Invalid move" };
     } else if (action.type === 'summon') {
       return this.summonPiece(action.piece, action.square as Square);
     } else if (action.type === 'resign') {
@@ -130,31 +144,25 @@ export class SummonChessGame {
       else this.resignedBy = turn;
       return { success: true };
     }
-    return { success: false, error: "Unknown action type" };
+    return { success: false, error: "Invalid action" };
   }
 
   private summonPiece(piece: PieceType, square: Square): { success: boolean, error?: string } {
     const turn = this.chess.turn();
     const deck = turn === 'w' ? this.whiteDeck : this.blackDeck;
-
     const pieceIndex = deck.indexOf(piece);
+
     if (pieceIndex === -1) return { success: false, error: "Piece not in deck" };
     if (this.chess.get(square)) return { success: false, error: "Square occupied" };
-    if (!this.isReachableByOwnPiece(square, turn)) {
-      return { success: false, error: "Cannot summon: Square not reachable by any of your pieces" };
-    }
+    if (!isReachableByOwnPiece(this.chess, square, turn)) return { success: false, error: "Square not reachable" };
 
     const rank = parseInt(square[1]);
-    if (piece === 'p' && (rank === 1 || rank === 8)) return { success: false, error: "Pawns cannot be summoned on rank 1 or 8" };
+    if (piece === 'p' && (rank === 1 || rank === 8)) return { success: false, error: "Invalid pawn rank" };
 
-    const success = this.chess.put({ type: piece, color: turn }, square);
-    if (!success) {
-      return { success: false, error: "Placement failed (internal)" };
-    }
-
+    if (!this.chess.put({ type: piece, color: turn }, square)) return { success: false, error: "Put failed" };
     if (this.chess.inCheck()) {
       this.chess.remove(square);
-      return { success: false, error: "Cannot summon: results in self-check" };
+      return { success: false, error: "Results in self-check" };
     }
 
     deck.splice(pieceIndex, 1);
@@ -163,19 +171,9 @@ export class SummonChessGame {
     parts[1] = parts[1] === 'w' ? 'b' : 'w';
     parts[3] = '-';
     parts[4] = '0';
-    if (turn === 'b') {
-      parts[5] = (parseInt(parts[5]) + 1).toString();
-    }
+    if (turn === 'b') parts[5] = (parseInt(parts[5]) + 1).toString();
 
-    const newFen = parts.join(' ');
-    try {
-      this.chess.load(newFen);
-    } catch (e) {
-      deck.push(piece);
-      this.chess.remove(square);
-      return { success: false, error: "FEN invalid update" };
-    }
-
+    this.chess.load(parts.join(' '));
     this.lastMove = { from: '@', to: square };
     return { success: true };
   }
@@ -187,23 +185,16 @@ export class SummonChessGame {
 
     const turn = this.chess.turn();
     const deck = turn === 'w' ? this.whiteDeck : this.blackDeck;
-
     if (deck.length === 0) return true;
-
-    const hasNonPawn = deck.some(p => p !== 'p');
-    const hasPawn = deck.some(p => p === 'p');
 
     for (let r = 1; r <= 8; r++) {
       for (let c = 0; c < 8; c++) {
-        const file = 'abcdefgh'[c];
-        const square = (file + r) as Square;
-        if (!this.chess.get(square)) {
-          if (hasNonPawn) return false;
-          if (hasPawn && r !== 1 && r !== 8) return false;
+        const sq = (String.fromCharCode(97 + c) + r) as Square;
+        if (!this.chess.get(sq) && isReachableByOwnPiece(this.chess, sq, turn)) {
+          if (deck.some(p => p !== 'p' || (r !== 1 && r !== 8))) return false;
         }
       }
     }
-
     return true;
   }
 
@@ -212,16 +203,11 @@ export class SummonChessGame {
     if (this.isTrueCheckmate()) return true;
     if (this.checkStalemate()) return true;
     if (this.chess.isThreefoldRepetition()) return true;
-    if (this.whiteDeck.length === 0 && this.blackDeck.length === 0) {
-      if (this.chess.isDraw()) return true;
-    }
-    return false;
+    return this.whiteDeck.length === 0 && this.blackDeck.length === 0 && this.chess.isDraw();
   }
 
   private isTrueCheckmate(): boolean {
-    if (this.resignedBy || this.isTimeout) return false;
-    if (!this.chess.isCheckmate()) return false;
-    return !this.canSummonToEscape();
+    return this.chess.isCheckmate() && !this.canSummonToEscape();
   }
 
   private canSummonToEscape(): boolean {
@@ -229,58 +215,36 @@ export class SummonChessGame {
     const deck = turn === 'w' ? this.whiteDeck : this.blackDeck;
     if (deck.length === 0) return false;
 
-    const uniquePieces = Array.from(new Set(deck));
     const fen = this.chess.fen();
+    const pieces = Array.from(new Set(deck));
 
-    for (const piece of uniquePieces) {
+    for (const piece of pieces) {
       for (let r = 1; r <= 8; r++) {
         if (piece === 'p' && (r === 1 || r === 8)) continue;
         for (let c = 0; c < 8; c++) {
-          const file = 'abcdefgh'[c];
-          const square = (file + r) as Square;
-          if (this.chess.get(square)) continue;
-          if (!isReachableByOwnPiece(this.chess, square, turn)) continue;
-
-          const tempChess = new Chess(fen);
-          tempChess.put({ type: piece, color: turn }, square);
-          if (!tempChess.inCheck()) return true;
+          const sq = (String.fromCharCode(97 + c) + r) as Square;
+          if (!this.chess.get(sq) && isReachableByOwnPiece(this.chess, sq, turn)) {
+            const temp = new Chess(fen);
+            temp.put({ type: piece, color: turn }, sq);
+            if (!temp.inCheck()) return true;
+          }
         }
       }
     }
     return false;
   }
 
-  private getWinner(): PieceColor | null {
-    if (this.resignedBy) return this.resignedBy === 'w' ? 'b' : 'w';
-    if (this.isTimeout) return this.whiteTime <= 0 ? 'b' : 'w';
-    if (this.isTrueCheckmate()) return this.chess.turn() === 'w' ? 'b' : 'w';
-    return null;
-  }
-
   public serialize(): any {
     return {
-      fen: this.chess.fen(),
-      whiteDeck: this.whiteDeck,
-      blackDeck: this.blackDeck,
-      whitePlayerId: this.whitePlayerId,
-      blackPlayerId: this.blackPlayerId,
-      resignedBy: this.resignedBy,
-      whiteTime: this.whiteTime,
-      blackTime: this.blackTime,
-      lastActionTimestamp: this.lastActionTimestamp,
-      chat: this.chat,
-      isTimeout: this.isTimeout,
+      fen: this.chess.fen(), whiteDeck: this.whiteDeck, blackDeck: this.blackDeck,
+      whitePlayerId: this.whitePlayerId, blackPlayerId: this.blackPlayerId,
+      resignedBy: this.resignedBy, whiteTime: this.whiteTime, blackTime: this.blackTime,
+      lastActionTimestamp: this.lastActionTimestamp, chat: this.chat, isTimeout: this.isTimeout,
     };
   }
 
   static deserialize(data: any): SummonChessGame {
-    const game = new SummonChessGame(
-      data.fen,
-      data.whiteDeck,
-      data.blackDeck,
-      data.whitePlayerId,
-      data.blackPlayerId
-    );
+    const game = new SummonChessGame(data.fen, data.whiteDeck, data.blackDeck, data.whitePlayerId, data.blackPlayerId);
     if (data.resignedBy) game.resignedBy = data.resignedBy;
     if (data.whiteTime !== undefined) game.whiteTime = data.whiteTime;
     if (data.blackTime !== undefined) game.blackTime = data.blackTime;
@@ -289,72 +253,41 @@ export class SummonChessGame {
     if (data.isTimeout !== undefined) game.isTimeout = data.isTimeout;
     return game;
   }
-
-  public isReachableByOwnPiece(target: Square, color: PieceColor): boolean {
-    return isReachableByOwnPiece(this.chess, target, color);
-  }
 }
 
 export function isReachableByOwnPiece(chess: Chess, target: Square, color: PieceColor): boolean {
-  const targetFile = target.charCodeAt(0) - 'a'.charCodeAt(0);
-  const targetRank = parseInt(target[1]) - 1;
-
+  const tx = target.charCodeAt(0) - 97, ty = parseInt(target[1]) - 1;
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
-      const fileChar = String.fromCharCode('a'.charCodeAt(0) + c);
-      const rankNum = r + 1;
-      const sq = (fileChar + rankNum) as Square;
-      const piece = chess.get(sq);
-
-      if (!piece || piece.color !== color) continue;
-      if (canPieceReach(chess, piece.type, c, r, targetFile, targetRank, piece.color as PieceColor)) {
-        return true;
-      }
+      const sq = (String.fromCharCode(97 + c) + (r + 1)) as Square;
+      const p = chess.get(sq);
+      if (p && p.color === color && canPieceReach(chess, p.type, c, r, tx, ty, color)) return true;
     }
   }
   return false;
 }
 
-export function canPieceReach(chess: Chess, type: string, fromX: number, fromY: number, toX: number, toY: number, color: PieceColor): boolean {
-  const dx = toX - fromX;
-  const dy = toY - fromY;
+function canPieceReach(chess: Chess, type: string, fx: number, fy: number, tx: number, ty: number, color: PieceColor): boolean {
+  const dx = tx - fx, dy = ty - fy;
   if (dx === 0 && dy === 0) return false;
-
+  const adx = Math.abs(dx), ady = Math.abs(dy);
   switch (type) {
-    case 'p':
-      const direction = color === 'w' ? 1 : -1;
-      if (Math.abs(dx) <= 1 && dy === direction) return true;
-      return false;
-    case 'n':
-      return (Math.abs(dx) === 2 && Math.abs(dy) === 1) || (Math.abs(dx) === 1 && Math.abs(dy) === 2);
-    case 'k':
-      return Math.abs(dx) <= 1 && Math.abs(dy) <= 1;
-    case 'b':
-      if (Math.abs(dx) !== Math.abs(dy)) return false;
-      return isPathClear(chess, fromX, fromY, toX, toY);
-    case 'r':
-      if (dx !== 0 && dy !== 0) return false;
-      return isPathClear(chess, fromX, fromY, toX, toY);
-    case 'q':
-      if (dx !== 0 && dy !== 0 && Math.abs(dx) !== Math.abs(dy)) return false;
-      return isPathClear(chess, fromX, fromY, toX, toY);
+    case 'p': return adx <= 1 && dy === (color === 'w' ? 1 : -1);
+    case 'n': return (adx === 2 && ady === 1) || (adx === 1 && ady === 2);
+    case 'k': return adx <= 1 && ady <= 1;
+    case 'b': return adx === ady && isPathClear(chess, fx, fy, tx, ty);
+    case 'r': return (dx === 0 || dy === 0) && isPathClear(chess, fx, fy, tx, ty);
+    case 'q': return (adx === ady || dx === 0 || dy === 0) && isPathClear(chess, fx, fy, tx, ty);
   }
   return false;
 }
 
-export function isPathClear(chess: Chess, fromX: number, fromY: number, toX: number, toY: number): boolean {
-  const stepX = Math.sign(toX - fromX);
-  const stepY = Math.sign(toY - fromY);
-  let currX = fromX + stepX;
-  let currY = fromY + stepY;
-
-  while (currX !== toX || currY !== toY) {
-    const fileChar = String.fromCharCode('a'.charCodeAt(0) + currX);
-    const rankNum = currY + 1;
-    const sq = (fileChar + rankNum) as Square;
-    if (chess.get(sq)) return false;
-    currX += stepX;
-    currY += stepY;
+function isPathClear(chess: Chess, fx: number, fy: number, tx: number, ty: number): boolean {
+  const sx = Math.sign(tx - fx), sy = Math.sign(ty - fy);
+  let cx = fx + sx, cy = fy + sy;
+  while (cx !== tx || cy !== ty) {
+    if (chess.get((String.fromCharCode(97 + cx) + (cy + 1)) as Square)) return false;
+    cx += sx; cy += sy;
   }
   return true;
 }

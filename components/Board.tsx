@@ -75,7 +75,7 @@ export default function Board({
         const isLastMoveFrom = lastMove?.from === squareId;
         const isLastMoveTo = lastMove?.to === squareId;
         const isPremoveFrom = premove?.from === squareId;
-        const isPremoveTo = (premove as any)?.to === squareId;
+        const isPremoveTo = (premove as any)?.to === squareId || (premove as any)?.square === squareId;
 
         const PieceComponent = piece
           ? ChessPieces[piece.color][piece.type]
