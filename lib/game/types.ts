@@ -6,6 +6,14 @@ export interface Piece {
   color: PieceColor;
 }
 
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  nickname: string;
+  text: string;
+  timestamp: number;
+}
+
 export interface GameState {
   fen: string;
   turn: PieceColor;
@@ -20,6 +28,10 @@ export interface GameState {
   lastMove: { from: string; to: string } | null; // For highlighting
   whitePlayerId?: string;
   blackPlayerId?: string;
+  whiteTime: number; // in seconds
+  blackTime: number; // in seconds
+  isTimeout: boolean;
+  chat: ChatMessage[];
 }
 
 export interface MoveAction {
@@ -39,4 +51,10 @@ export interface ResignAction {
   type: 'resign';
 }
 
-export type Action = MoveAction | SummonAction | ResignAction;
+export interface ChatAction {
+  type: 'chat';
+  text: string;
+  nickname: string;
+}
+
+export type Action = MoveAction | SummonAction | ResignAction | ChatAction;

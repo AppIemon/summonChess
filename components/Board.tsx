@@ -12,6 +12,7 @@ interface BoardProps {
   orientation?: 'w' | 'b';
   lastMove?: { from: string; to: string } | null;
   isCheckmate?: boolean;
+  premove?: { from: string; to?: string } | null;
 }
 
 // FEN Parser helper
@@ -47,6 +48,7 @@ export default function Board({
   orientation = 'w',
   lastMove,
   isCheckmate = false,
+  premove = null,
 }: BoardProps) {
   const board = fenToBoard(fen);
 
@@ -72,6 +74,8 @@ export default function Board({
         const isTarget = validTargetSquares.includes(squareId);
         const isLastMoveFrom = lastMove?.from === squareId;
         const isLastMoveTo = lastMove?.to === squareId;
+        const isPremoveFrom = premove?.from === squareId;
+        const isPremoveTo = (premove as any)?.to === squareId;
 
         const PieceComponent = piece
           ? ChessPieces[piece.color][piece.type]
@@ -82,6 +86,7 @@ export default function Board({
             key={squareId}
             className={clsx(styles.square, isLight ? styles.white : styles.black, {
               [styles.selected]: isSelected || isLastMoveFrom || isLastMoveTo,
+              [styles.premoveHighlight]: isPremoveFrom || isPremoveTo,
             })}
             onClick={() => onSquareClick(squareId)}
           >

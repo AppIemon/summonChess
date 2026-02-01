@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import useSWR from 'swr';
 import Board from './Board';
 import Hand from './Hand';
-import { GameState, PieceType, PieceColor } from '@/lib/game/types';
+import { GameState, PieceType, PieceColor, ChatMessage, Action } from '@/lib/game/types';
 import styles from './GameInterface.module.css';
 
 const fetcher = async (url: string) => {
@@ -20,6 +20,37 @@ const fetcher = async (url: string) => {
 
 interface GameInterfaceProps {
   gameId: string;
+}
+
+// Timer sub-component for smooth countdown
+function TimerDisplay({ seconds, active }: { seconds: number, active: boolean }) {
+  const [displaySeconds, setDisplaySeconds] = useState(seconds);
+
+  useEffect(() => {
+    setDisplaySeconds(seconds);
+  }, [seconds]);
+
+  useEffect(() => {
+    if (!active || displaySeconds <= 0) return;
+
+    const interval = setInterval(() => {
+      setDisplaySeconds(prev => Math.max(0, prev - 1));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [active, displaySeconds]);
+
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60);
+    const ss = Math.floor(s % 60);
+    return `${m}:${ss.toString().padStart(2, '0')}`;
+  };
+
+  return (
+    <div className={`${styles.timer} ${displaySeconds <= 30 ? styles.timerLow : ''}`}>
+      {formatTime(displaySeconds)}
+    </div>
+  );
 }
 
 // Confetti component for victory celebration
@@ -63,7 +94,7 @@ function Confetti({ count = 50 }: { count?: number }) {
 }
 
 // Checkmate Victory Overlay
-function CheckmateOverlay({ winner }: { winner: PieceColor }) {
+function CheckmateOverlay({ winner, isTimeout }: { winner: PieceColor, isTimeout?: boolean }) {
   const isWhiteWinner = winner === 'w';
 
   return (
@@ -80,7 +111,7 @@ function CheckmateOverlay({ winner }: { winner: PieceColor }) {
 
         <div className={styles.victoryContent}>
           <div className={styles.crown}>👑</div>
-          <div className={styles.victoryText}>체크메이트!</div>
+          <div className={styles.victoryText}>{isTimeout ? '시간승!' : '체크메이트!'}</div>
           <div className={`${styles.winnerText} ${isWhiteWinner ? styles.winnerWhite : styles.winnerBlack}`}>
             {isWhiteWinner ? '백 승리' : '흑 승리'}
           </div>
@@ -103,33 +134,63 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
   const [myColor, setMyColor] = useState<PieceColor>('w');
   const [showVictory, setShowVictory] = useState(false);
 
+  // Premoves state
+  const [premove, setPremove] = useState<Action | null>(null);
+
+  // Chat state
+  const [chatInput, setChatInput] = useState('');
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const [playerId, setPlayerId] = useState<string | null>(null);
+  const [lastChatCount, setLastChatCount] = useState(0);
+
+  useEffect(() => {
+    setPlayerId(localStorage.getItem('playerId'));
+  }, []);
+
   // Automatic orientation
   useEffect(() => {
-    if (gameState) {
-      const playerId = localStorage.getItem('playerId');
+    if (gameState && playerId) {
       if (playerId === gameState.whitePlayerId) {
         setMyColor('w');
       } else if (playerId === gameState.blackPlayerId) {
         setMyColor('b');
       }
     }
-  }, [gameState?.whitePlayerId, gameState?.blackPlayerId]);
+  }, [gameState?.whitePlayerId, gameState?.blackPlayerId, playerId]);
 
-  // Trigger victory animation on checkmate
+  // Trigger victory animation
   useEffect(() => {
-    if (gameState?.isCheckmate && gameState?.winner && !showVictory) {
+    const isGameOver = gameState?.isCheckmate || gameState?.isTimeout || (gameState?.winner && !gameState?.isCheckmate);
+    if (isGameOver && gameState?.winner && !showVictory) {
       setShowVictory(true);
     }
-  }, [gameState?.isCheckmate, gameState?.winner, showVictory]);
+  }, [gameState?.isCheckmate, gameState?.isTimeout, gameState?.winner, showVictory]);
 
-  // Reset selection when turn changes
+  // Handle Premove execution
   useEffect(() => {
-    if (gameState) {
+    if (gameState?.turn === myColor && premove) {
+      const actionToTry = premove;
+      setPremove(null); // Clear it first to avoid loops
+      executeAction(actionToTry);
+    }
+  }, [gameState?.turn, myColor, premove]);
+
+  // Scroll chat to bottom
+  useEffect(() => {
+    if (gameState?.chat && gameState.chat.length > lastChatCount) {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      setLastChatCount(gameState.chat.length);
+    }
+  }, [gameState?.chat, lastChatCount]);
+
+  // Reset selection when turn changes (if not premoving)
+  useEffect(() => {
+    if (gameState?.turn === myColor) {
       setValidTargetSquares([]);
       setSelectedSquare(null);
       setSelectedHandPiece(null);
     }
-  }, [gameState?.turn]);
+  }, [gameState?.turn, myColor]);
 
   if (error) {
     return (
@@ -153,93 +214,105 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
   }
 
   const handleSquareClick = async (square: string) => {
-    // If we have a selected hand piece, try to summon
-    if (selectedHandPiece) {
-      if (validTargetSquares.includes(square)) {
-        await executeAction({
-          type: 'summon',
-          piece: selectedHandPiece,
-          square,
-        });
-      } else {
-        setSelectedHandPiece(null);
-        setValidTargetSquares([]);
-      }
-      return;
-    }
+    if (gameState.winner) return;
 
-    // If we have a selected board square
-    if (selectedSquare) {
-      if (selectedSquare === square) {
-        setSelectedSquare(null);
-        setValidTargetSquares([]);
+    // Handle selection if it's my turn
+    if (gameState.turn === myColor) {
+      if (selectedHandPiece) {
+        if (validTargetSquares.includes(square)) {
+          await executeAction({
+            type: 'summon',
+            piece: selectedHandPiece,
+            square,
+          });
+        } else {
+          setSelectedHandPiece(null);
+          setValidTargetSquares([]);
+        }
         return;
       }
 
-      if (validTargetSquares.includes(square)) {
-        await executeAction({
+      if (selectedSquare) {
+        if (selectedSquare === square) {
+          setSelectedSquare(null);
+          setValidTargetSquares([]);
+          return;
+        }
+
+        if (validTargetSquares.includes(square)) {
+          await executeAction({
+            type: 'move',
+            from: selectedSquare,
+            to: square,
+          });
+          return;
+        }
+      }
+
+      // Select piece
+      import('chess.js').then(({ Chess }) => {
+        const chess = new Chess(gameState.fen);
+        const piece = chess.get(square as any);
+
+        if (piece && piece.color === gameState.turn) {
+          setSelectedSquare(square);
+          const moves = chess.moves({ square: square as any, verbose: true });
+          setValidTargetSquares(moves.map(m => m.to));
+          setSelectedHandPiece(null);
+        } else {
+          setSelectedSquare(null);
+          setValidTargetSquares([]);
+        }
+      });
+    } else {
+      // Premove logic: If it's not my turn, allow setting a move
+      // Summons are harder to premove without full engine verification, 
+      // but let's allow basic "move" premoves for now.
+      if (selectedSquare) {
+        if (selectedSquare === square) {
+          setSelectedSquare(null);
+          setPremove(null);
+          return;
+        }
+
+        // We set it as a premove even if we don't know yet if it's legal
+        setPremove({
           type: 'move',
           from: selectedSquare,
-          to: square,
+          to: square
         });
-        return;
+        setSelectedSquare(null);
+      } else {
+        // Just select for premove
+        setSelectedSquare(square);
       }
     }
-
-    // Try to select the clicked square
-    import('chess.js').then(({ Chess }) => {
-      const chess = new Chess(gameState.fen);
-      const piece = chess.get(square as any);
-
-      if (piece && piece.color === gameState.turn) {
-        setSelectedSquare(square);
-        const moves = chess.moves({ square: square as any, verbose: true });
-        setValidTargetSquares(moves.map(m => m.to));
-        setSelectedHandPiece(null);
-      } else {
-        setSelectedSquare(null);
-        setValidTargetSquares([]);
-      }
-    });
   };
 
   const handleHandSelect = (piece: PieceType | null) => {
-    if (!piece) {
+    if (gameState.winner) return;
+    if (!piece || gameState.turn !== myColor) {
       setSelectedHandPiece(null);
       setValidTargetSquares([]);
-      return;
-    }
-
-    if (gameState.turn !== myColor) {
       return;
     }
 
     setSelectedHandPiece(piece);
     setSelectedSquare(null);
 
-    const turn = gameState.turn;
-    const valid: string[] = [];
-
     Promise.all([
       import('chess.js'),
       import('@/lib/game/engine')
     ]).then(([{ Chess }, { isReachableByOwnPiece }]) => {
       const chess = new Chess(gameState.fen);
-
+      const valid: string[] = [];
       for (let r = 1; r <= 8; r++) {
         for (let c = 0; c < 8; c++) {
           const file = 'abcdefgh'[c];
           const sq = `${file}${r}`;
-          const currentPiece = chess.get(sq as any);
-
-          if (!currentPiece) {
-            if (!isReachableByOwnPiece(chess, sq as any, turn)) {
-              continue;
-            }
-
-            if (piece === 'p') {
-              if (r === 1 || r === 8) continue;
-            }
+          if (!chess.get(sq as any)) {
+            if (!isReachableByOwnPiece(chess, sq as any, myColor)) continue;
+            if (piece === 'p' && (r === 1 || r === 8)) continue;
             valid.push(sq);
           }
         }
@@ -249,7 +322,6 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
   };
 
   const executeAction = async (action: any) => {
-    const playerId = localStorage.getItem('playerId');
     const res = await fetch(`/api/game/${gameId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -262,13 +334,28 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
       setSelectedHandPiece(null);
       setValidTargetSquares([]);
     } else {
-      try {
-        const errData = await res.json();
-        alert(errData.error || '유효하지 않은 이동입니다');
-      } catch (e) {
-        alert('유효하지 않은 이동입니다');
+      if (gameState.turn === myColor) {
+        try {
+          const errData = await res.json();
+          console.error('Action failed:', errData.error);
+        } catch (e) { }
       }
     }
+  };
+
+  const handleSendChat = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!chatInput.trim()) return;
+
+    const nickname = localStorage.getItem('nickname') || 'Unknown';
+    const text = chatInput;
+    setChatInput('');
+
+    await executeAction({
+      type: 'chat',
+      text,
+      nickname
+    });
   };
 
   const handleResign = async () => {
@@ -280,52 +367,101 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
     <div className={styles.container}>
       {/* Victory Overlay */}
       {showVictory && gameState.winner && (
-        <CheckmateOverlay winner={gameState.winner} />
+        <CheckmateOverlay winner={gameState.winner} isTimeout={gameState.isTimeout} />
       )}
 
       <div className={styles.header}>
         <h2>소환 체스</h2>
         <div className={styles.status}>
-          차례: {gameState.turn === 'w' ? '⚪ 백' : '⚫ 흑'}
+          <span>차례: {gameState.turn === 'w' ? '⚪ 백' : '⚫ 흑'}</span>
           {gameState.isCheck && <span className={styles.check}>⚠️ 체크!</span>}
           {gameState.isCheckmate && <span className={styles.mate}>👑 체크메이트!</span>}
+          {gameState.isTimeout && <span className={styles.mate}>⏰ 시간초과!</span>}
           {gameState.isStalemate && <span className={styles.draw}>🤝 스테일메이트</span>}
-          {gameState.winner && !gameState.isCheckmate && (
+          {gameState.winner && !gameState.isCheckmate && !gameState.isTimeout && (
             <span className={styles.mate}>🏳️ {gameState.winner === 'w' ? '백' : '흑'} 승리 (기권)</span>
           )}
         </div>
       </div>
 
-      <div className={styles.gameLayout}>
-        {/* Opponent Hand */}
-        <Hand
-          pieces={myColor === 'w' ? gameState.blackDeck : gameState.whiteDeck}
-          color={myColor === 'w' ? 'b' : 'w'}
-          onSelect={() => { }}
-          selectedPiece={null}
-          disabled={true}
-          className={styles.opponentHand}
-        />
+      <div className={styles.gameWrapper}>
+        <div className={styles.gameLayout}>
+          {/* Opponent Hand & Timer */}
+          <div className={styles.handWrapper}>
+            <TimerDisplay
+              seconds={myColor === 'w' ? gameState.blackTime : gameState.whiteTime}
+              active={gameState.turn !== myColor && !gameState.winner}
+            />
+            <Hand
+              pieces={myColor === 'w' ? gameState.blackDeck : gameState.whiteDeck}
+              color={myColor === 'w' ? 'b' : 'w'}
+              onSelect={() => { }}
+              selectedPiece={null}
+              disabled={true}
+              className={styles.opponentHand}
+            />
+          </div>
 
-        <Board
-          fen={gameState.fen}
-          onSquareClick={handleSquareClick}
-          selectedSquare={selectedSquare}
-          validTargetSquares={validTargetSquares}
-          orientation={myColor}
-          lastMove={gameState.lastMove}
-          isCheckmate={gameState.isCheckmate}
-        />
+          <Board
+            fen={gameState.fen}
+            onSquareClick={handleSquareClick}
+            selectedSquare={selectedSquare}
+            validTargetSquares={validTargetSquares}
+            orientation={myColor}
+            lastMove={gameState.lastMove}
+            isCheckmate={gameState.isCheckmate}
+            premove={premove as any}
+          />
 
-        {/* My Hand */}
-        <Hand
-          pieces={myColor === 'w' ? gameState.whiteDeck : gameState.blackDeck}
-          color={myColor}
-          onSelect={handleHandSelect}
-          selectedPiece={selectedHandPiece}
-          disabled={gameState.turn !== myColor}
-          className={styles.myHand}
-        />
+          {/* My Hand & Timer */}
+          <div className={styles.handWrapper}>
+            <Hand
+              pieces={myColor === 'w' ? gameState.whiteDeck : gameState.blackDeck}
+              color={myColor}
+              onSelect={handleHandSelect}
+              selectedPiece={selectedHandPiece}
+              disabled={gameState.turn !== myColor}
+              className={styles.myHand}
+            />
+            <TimerDisplay
+              seconds={myColor === 'w' ? gameState.whiteTime : gameState.blackTime}
+              active={gameState.turn === myColor && !gameState.winner}
+            />
+          </div>
+
+          {premove && (
+            <div className={styles.premoveNotice}>
+              ⚡ 프리무브 대기 중: {premove.type === 'move' ? `${(premove as any).from}→${(premove as any).to}` : '소환'}
+              <button style={{ marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer' }} onClick={() => setPremove(null)}>✖</button>
+            </div>
+          )}
+        </div>
+
+        {/* Chat Sidebar */}
+        <div className={styles.chatSidebar}>
+          <div className={styles.chatMessages}>
+            {gameState.chat.map((msg) => (
+              <div
+                key={msg.id}
+                className={`${styles.chatMessage} ${msg.senderId === playerId ? styles.msgMe : styles.msgOther}`}
+              >
+                <span className={styles.senderName}>{msg.nickname}</span>
+                {msg.text}
+              </div>
+            ))}
+            <div ref={chatEndRef} />
+          </div>
+          <form className={styles.chatInputArea} onSubmit={handleSendChat}>
+            <input
+              type="text"
+              className={styles.chatInput}
+              placeholder="메시지 입력..."
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+            />
+            <button type="submit" className={styles.chatSendBtn}>🏹</button>
+          </form>
+        </div>
       </div>
 
       <div className={styles.controls}>
@@ -338,7 +474,7 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
         }}>
           📋 링크 공유
         </button>
-        <button onClick={() => alert('🎮 게임 규칙\n\n• 턴마다 이동 또는 소환 중 하나를 선택\n• 자신의 기물이 도달할 수 있는 빈 칸에 소환 가능\n• 폰은 1랭크/8랭크에 소환 불가\n• 체크메이트로 승리!')}>
+        <button onClick={() => alert('🎮 게임 규칙\n\n• 10분 제한 시간\n• 실시간 채팅 가능\n• 프리무브: 상대 차례에 수를 미리 두면 즉시 실행\n• 자신의 기물이 도달할 수 있는 빈 칸에 소환 가능\n• 체크메이트로 승리!')}>
           ❓ 도움말
         </button>
         <button className={styles.resignButton} onClick={handleResign}>
