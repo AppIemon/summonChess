@@ -150,7 +150,7 @@ export default function Home() {
           <ul>
             <li>
               <span className={styles.ruleIcon}>👑</span>
-              게임은 킹 하나로 시작합니다.
+              게임 초기 세팅은 킹만 남기고 모두 버립니다. 빠진 모든 기물들은 소환 가능합니다.
             </li>
             <li>
               <span className={styles.ruleIcon}>♟️</span>
