@@ -1,15 +1,24 @@
 "use client";
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import styles from './page.module.css';
 
 export default function Home() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [roomCode, setRoomCode] = useState('');
+  const [nickname, setNickname] = useState('');
   const [showJoinInput, setShowJoinInput] = useState(false);
   const [error, setError] = useState('');
+
+  // Load saved nickname
+  useEffect(() => {
+    const savedNickname = localStorage.getItem('nickname');
+    if (savedNickname) {
+      setNickname(savedNickname);
+    }
+  }, []);
 
   // Get or create player ID
   const getPlayerId = () => {
@@ -21,17 +30,28 @@ export default function Home() {
     return id;
   };
 
+  // Save nickname
+  const saveNickname = (name: string) => {
+    localStorage.setItem('nickname', name);
+  };
+
   // Create a new room
   const createRoom = async () => {
+    if (!nickname.trim()) {
+      setError('닉네임을 입력해주세요.');
+      return;
+    }
+
     setLoading(true);
     setError('');
+    saveNickname(nickname.trim());
 
     try {
       const playerId = getPlayerId();
       const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId }),
+        body: JSON.stringify({ playerId, nickname: nickname.trim() }),
       });
 
       if (!res.ok) {
@@ -54,11 +74,16 @@ export default function Home() {
 
   // Join existing room
   const joinRoom = () => {
+    if (!nickname.trim()) {
+      setError('닉네임을 입력해주세요.');
+      return;
+    }
     if (!roomCode.trim()) {
       setError('방 코드를 입력해주세요.');
       return;
     }
 
+    saveNickname(nickname.trim());
     setError('');
     router.push(`/room/${roomCode.trim().toUpperCase()}`);
   };
@@ -74,6 +99,19 @@ export default function Home() {
             기존 체스에 소환 시스템을 더했습니다.<br />
             킹 하나로 시작하여 당신의 군대를 전장에 소환하세요.
           </p>
+        </div>
+
+        {/* Nickname Input */}
+        <div className={styles.nicknameSection}>
+          <label className={styles.nicknameLabel}>닉네임</label>
+          <input
+            type="text"
+            className={styles.nicknameInput}
+            placeholder="닉네임 입력"
+            value={nickname}
+            onChange={(e) => setNickname(e.target.value)}
+            maxLength={12}
+          />
         </div>
 
         {/* Action Buttons */}

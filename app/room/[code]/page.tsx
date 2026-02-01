@@ -7,7 +7,9 @@ import styles from './page.module.css';
 interface RoomInfo {
   roomCode: string;
   hostId: string;
+  hostNickname: string;
   guestId?: string;
+  guestNickname?: string;
   gameId?: string;
   status: 'waiting' | 'playing' | 'finished';
 }
@@ -17,6 +19,7 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
   const [roomCode, setRoomCode] = useState<string>('');
   const [room, setRoom] = useState<RoomInfo | null>(null);
   const [playerId, setPlayerId] = useState<string>('');
+  const [nickname, setNickname] = useState<string>('');
   const [isHost, setIsHost] = useState(false);
   const [error, setError] = useState<string>('');
   const [joining, setJoining] = useState(false);
@@ -26,7 +29,7 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
     params.then(p => setRoomCode(p.code.toUpperCase()));
   }, [params]);
 
-  // Initialize player ID
+  // Initialize player ID and nickname
   useEffect(() => {
     let id = localStorage.getItem('playerId');
     if (!id) {
@@ -34,6 +37,9 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
       localStorage.setItem('playerId', id);
     }
     setPlayerId(id);
+
+    const savedNickname = localStorage.getItem('nickname') || '플레이어';
+    setNickname(savedNickname);
   }, []);
 
   // Fetch room status
@@ -81,7 +87,7 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
       const res = await fetch(`/api/room/${roomCode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId, action: 'join' })
+        body: JSON.stringify({ playerId, action: 'join', nickname })
       });
 
       const data = await res.json();
@@ -170,7 +176,9 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
         <div className={styles.card}>
           <h2 className={styles.title}>방 참가</h2>
           <div className={styles.roomCode}>{roomCode}</div>
-          <p className={styles.subtitle}>이 방에 참가하시겠습니까?</p>
+          <p className={styles.subtitle}>
+            <strong>{room.hostNickname}</strong>님의 방입니다
+          </p>
           <div className={styles.buttonGroup}>
             <button
               className={styles.primaryButton}
@@ -207,23 +215,28 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
           </button>
         </div>
 
+        <div className={styles.colorNotice}>
+          🎲 색상은 게임 시작 시 랜덤 배정됩니다
+        </div>
+
         <div className={styles.playerSection}>
           <h3>플레이어</h3>
           <div className={styles.playerList}>
             <div className={styles.player}>
-              <span className={styles.playerIcon}>♔</span>
+              <span className={styles.playerIcon}>👤</span>
               <span className={styles.playerName}>
-                방장 (백)
+                {room.hostNickname}
                 {room.hostId === playerId && <span className={styles.youBadge}>나</span>}
+                <span className={styles.hostBadge}>방장</span>
               </span>
               <span className={styles.readyStatus}>✓</span>
             </div>
             <div className={`${styles.player} ${!room.guestId ? styles.empty : ''}`}>
-              <span className={styles.playerIcon}>♚</span>
+              <span className={styles.playerIcon}>👤</span>
               <span className={styles.playerName}>
                 {room.guestId ? (
                   <>
-                    게스트 (흑)
+                    {room.guestNickname || '플레이어'}
                     {room.guestId === playerId && <span className={styles.youBadge}>나</span>}
                   </>
                 ) : (
@@ -242,7 +255,7 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
               onClick={handleStart}
               disabled={!room.guestId}
             >
-              {room.guestId ? '게임 시작' : '대기 중...'}
+              {room.guestId ? '🎮 게임 시작' : '대기 중...'}
             </button>
           )}
           {!isHost && (

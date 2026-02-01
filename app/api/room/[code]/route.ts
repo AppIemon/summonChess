@@ -23,14 +23,15 @@ export async function POST(
 ) {
   try {
     const { code } = await params;
-    const { playerId, action } = await request.json();
+    const { playerId, action, nickname } = await request.json();
 
     if (!playerId) {
       return NextResponse.json({ error: 'playerId가 필요합니다.' }, { status: 400 });
     }
 
     if (action === 'join') {
-      const result = GameStore.joinRoom(code, playerId);
+      const playerNickname = nickname?.trim() || '플레이어';
+      const result = GameStore.joinRoom(code, playerId, playerNickname);
       if (!result.success) {
         return NextResponse.json({ error: result.error }, { status: 400 });
       }

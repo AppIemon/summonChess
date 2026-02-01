@@ -4,13 +4,14 @@ import { GameStore } from '@/lib/store';
 // POST: Create a new room
 export async function POST(request: Request) {
   try {
-    const { playerId } = await request.json();
+    const { playerId, nickname } = await request.json();
 
     if (!playerId) {
       return NextResponse.json({ error: 'playerId가 필요합니다.' }, { status: 400 });
     }
 
-    const room = GameStore.createRoom(playerId);
+    const playerNickname = nickname?.trim() || '플레이어';
+    const room = GameStore.createRoom(playerId, playerNickname);
     return NextResponse.json({
       success: true,
       roomCode: room.roomCode,

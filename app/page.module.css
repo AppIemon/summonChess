@@ -50,6 +50,41 @@
   word-break: keep-all;
 }
 
+.nicknameSection {
+  margin-bottom: 24px;
+}
+
+.nicknameLabel {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.nicknameInput {
+  width: 100%;
+  padding: 14px 20px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-align: center;
+  border: 2px solid #ddd;
+  border-radius: 12px;
+  background: #fff;
+  color: #1a1a2e;
+  transition: all 0.2s;
+}
+
+.nicknameInput::placeholder {
+  color: #aaa;
+}
+
+.nicknameInput:focus {
+  outline: none;
+  border-color: #1a1a2e;
+  box-shadow: 0 0 0 4px rgba(26, 26, 46, 0.1);
+}
+
 .actions {
   display: flex;
   flex-direction: column;

@@ -21,7 +21,9 @@ const ensureDir = () => {
 interface RoomInfo {
   roomCode: string;
   hostId: string;
+  hostNickname: string;
   guestId?: string;
+  guestNickname?: string;
   gameId?: string;
   status: 'waiting' | 'playing' | 'finished';
   createdAt: number;
@@ -125,11 +127,12 @@ export const GameStore = {
   },
 
   // Room management
-  createRoom: (hostId: string): RoomInfo => {
+  createRoom: (hostId: string, hostNickname: string): RoomInfo => {
     const roomCode = generateRoomCode();
     const roomInfo: RoomInfo = {
       roomCode,
       hostId,
+      hostNickname,
       status: 'waiting',
       createdAt: Date.now()
     };
@@ -142,7 +145,7 @@ export const GameStore = {
     return rooms.get(roomCode.toUpperCase());
   },
 
-  joinRoom: (roomCode: string, guestId: string): { success: boolean; error?: string; room?: RoomInfo } => {
+  joinRoom: (roomCode: string, guestId: string, guestNickname: string): { success: boolean; error?: string; room?: RoomInfo } => {
     const code = roomCode.toUpperCase();
     const room = rooms.get(code);
 
@@ -164,6 +167,7 @@ export const GameStore = {
 
     // Join the room
     room.guestId = guestId;
+    room.guestNickname = guestNickname;
     persist();
 
     return { success: true, room };
@@ -185,9 +189,12 @@ export const GameStore = {
       return { success: true, gameId: room.gameId };
     }
 
-    // Create the game (host is white, guest is black)
+    // Create the game with random color assignment
     const gameId = crypto.randomUUID();
-    const game = new SummonChessGame(undefined, undefined, undefined, room.hostId, room.guestId);
+    const hostIsWhite = Math.random() < 0.5;
+    const whitePlayer = hostIsWhite ? room.hostId : room.guestId;
+    const blackPlayer = hostIsWhite ? room.guestId : room.hostId;
+    const game = new SummonChessGame(undefined, undefined, undefined, whitePlayer, blackPlayer);
     games.set(gameId, game);
 
     room.gameId = gameId;
