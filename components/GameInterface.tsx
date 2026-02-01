@@ -214,7 +214,6 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
   const handleSquareClick = async (square: string) => {
     if (gameState.winner) return;
 
-    // Handle selection if it's my turn
     if (gameState.turn === myColor) {
       if (selectedHandPiece) {
         if (validTargetSquares.includes(square)) {
@@ -239,7 +238,6 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
         }
       }
 
-      // Try selecting a piece on the board
       import('chess.js').then(({ Chess }) => {
         const chess = new Chess(gameState.fen);
         const piece = chess.get(square as any);
@@ -254,9 +252,7 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
         }
       });
     } else {
-      // PREMOVE LOGIC
       if (selectedHandPiece) {
-        // Summon Premove
         setPremove({ type: 'summon', piece: selectedHandPiece, square });
         setSelectedHandPiece(null);
         setValidTargetSquares([]);
@@ -266,12 +262,10 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
           setPremove(null);
           return;
         }
-        // Move Premove
         setPremove({ type: 'move', from: selectedSquare, to: square });
         setSelectedSquare(null);
         setValidTargetSquares([]);
       } else {
-        // Start premove selection
         import('chess.js').then(({ Chess }) => {
           const chess = new Chess(gameState.fen);
           const piece = chess.get(square as any);
@@ -296,7 +290,6 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
     setSelectedHandPiece(piece);
     setSelectedSquare(null);
 
-    // If it's my turn, show valid squares
     if (gameState.turn === myColor) {
       Promise.all([
         import('chess.js'),
@@ -317,8 +310,6 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
         setValidTargetSquares(valid);
       });
     } else {
-      // Premove summon selection: we don't know valid squares yet (board changes),
-      // so we just highlight the whole board or let the user click anywhere.
       setValidTargetSquares([]);
     }
   };
@@ -336,7 +327,6 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
       setSelectedHandPiece(null);
       setValidTargetSquares([]);
     } else {
-      // Silence errors during premove if they fail
       if (gameState.turn === myColor) {
         try {
           const errData = await res.json();
@@ -360,6 +350,12 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
     await executeAction({ type: 'resign' });
   };
 
+  const opponentColor = myColor === 'w' ? 'b' : 'w';
+  const opponentDeck = myColor === 'w' ? gameState.blackDeck : gameState.whiteDeck;
+  const myDeck = myColor === 'w' ? gameState.whiteDeck : gameState.blackDeck;
+  const opponentTime = myColor === 'w' ? gameState.blackTime : gameState.whiteTime;
+  const myTime = myColor === 'w' ? gameState.whiteTime : gameState.blackTime;
+
   return (
     <div className={styles.container}>
       {showVictory && gameState.winner && (
@@ -380,20 +376,37 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
         </div>
       </div>
 
-      <div className={styles.gameWrapper}>
-        <div className={styles.gameLayout}>
-          <div className={styles.handWrapper}>
-            <TimerDisplay
-              seconds={myColor === 'w' ? gameState.blackTime : gameState.whiteTime}
-              active={gameState.turn !== myColor && !gameState.winner}
-            />
+      <div className={styles.mainLayout}>
+        {/* Left Sidebar: Hand / Summons */}
+        <div className={styles.leftSidebar}>
+          <div className={styles.sidebarSection}>
+            <h3>상대 기물</h3>
             <Hand
-              pieces={myColor === 'w' ? gameState.blackDeck : gameState.whiteDeck}
-              color={myColor === 'w' ? 'b' : 'w'}
+              pieces={opponentDeck}
+              color={opponentColor}
               onSelect={() => { }}
               selectedPiece={null}
               disabled={true}
-              className={styles.opponentHand}
+            />
+          </div>
+          <div className={styles.sidebarSection}>
+            <h3>나의 기물</h3>
+            <Hand
+              pieces={myDeck}
+              color={myColor}
+              onSelect={handleHandSelect}
+              selectedPiece={selectedHandPiece}
+              disabled={gameState.turn !== myColor && !premove}
+            />
+          </div>
+        </div>
+
+        {/* Center: Board + Timers */}
+        <div className={styles.centerArea}>
+          <div className={styles.timerBar}>
+            <TimerDisplay
+              seconds={opponentTime}
+              active={gameState.turn !== myColor && !gameState.winner}
             />
           </div>
 
@@ -408,56 +421,51 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
             premove={premove as any}
           />
 
-          <div className={styles.handWrapper}>
-            <Hand
-              pieces={myColor === 'w' ? gameState.whiteDeck : gameState.blackDeck}
-              color={myColor}
-              onSelect={handleHandSelect}
-              selectedPiece={selectedHandPiece}
-              disabled={gameState.turn !== myColor && !premove}
-              className={styles.myHand}
-            />
+          <div className={styles.timerBar}>
             <TimerDisplay
-              seconds={myColor === 'w' ? gameState.whiteTime : gameState.blackTime}
+              seconds={myTime}
               active={gameState.turn === myColor && !gameState.winner}
             />
           </div>
 
           {premove && (
             <div className={styles.premoveNotice}>
-              ⚡ 프리무브 예약: {premove.type === 'move' ? `${(premove as any).from}→${(premove as any).to}` : `소환(${(premove as any).piece.toUpperCase()} @ ${(premove as any).square})`}
-              <button style={{ marginLeft: 8, color: 'inherit', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 'bold' }} onClick={() => setPremove(null)}>✖</button>
+              <span>⚡ 프리무브: {premove.type === 'move' ? `${(premove as any).from}→${(premove as any).to}` : `소환(${(premove as any).piece.toUpperCase()}@${(premove as any).square})`}</span>
+              <button onClick={() => setPremove(null)}>✖</button>
             </div>
           )}
         </div>
 
-        <div className={styles.chatSidebar}>
-          <div className={styles.chatMessages}>
-            {gameState.chat.map((msg) => (
-              <div key={msg.id} className={`${styles.chatMessage} ${msg.senderId === playerId ? styles.msgMe : styles.msgOther}`}>
-                <span className={styles.senderName}>{msg.nickname}</span>
-                {msg.text}
-              </div>
-            ))}
-            <div ref={chatEndRef} />
+        {/* Right Sidebar: Chat */}
+        <div className={styles.rightSidebar}>
+          <div className={styles.chatSidebar}>
+            <div className={styles.chatMessages}>
+              {gameState.chat.map((msg) => (
+                <div key={msg.id} className={`${styles.chatMessage} ${msg.senderId === playerId ? styles.msgMe : styles.msgOther}`}>
+                  <span className={styles.senderName}>{msg.nickname}</span>
+                  {msg.text}
+                </div>
+              ))}
+              <div ref={chatEndRef} />
+            </div>
+            <form className={styles.chatInputArea} onSubmit={handleSendChat}>
+              <input
+                type="text"
+                className={styles.chatInput}
+                placeholder="메시지 입력..."
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+              />
+              <button type="submit" className={styles.chatSendBtn}>🏹</button>
+            </form>
           </div>
-          <form className={styles.chatInputArea} onSubmit={handleSendChat}>
-            <input
-              type="text"
-              className={styles.chatInput}
-              placeholder="메시지 입력..."
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-            />
-            <button type="submit" className={styles.chatSendBtn}>🏹</button>
-          </form>
         </div>
       </div>
 
       <div className={styles.controls}>
         <button onClick={() => setMyColor(myColor === 'w' ? 'b' : 'w')}>🔄 보드 뒤집기</button>
         <button onClick={() => { navigator.clipboard.writeText(window.location.href); alert('링크가 복사되었습니다!'); }}>📋 링크 공유</button>
-        <button onClick={() => alert('🎮 시스템 특징\n\n• 10분 타이머 (실시간 동기화)\n• 프리무브: 핸드 기물 소환 및 보드 이동 모두 지원\n• 매드무비 효과: 체크메이트/시간패배 시 극적인 연출\n• 자신의 기물 이동범위 내에만 기물 소환 가능')}>❓ 시스템 정보</button>
+        <button onClick={() => alert('🎮 조작 가이드\n\n• 왼쪽: 소환 가능한 기물 목록 (클릭 후 보드에 소환)\n• 중앙: 체스 보드 및 타이머\n• 오른쪽: 실시간 채팅\n• 프리무브: 상대 차례에 예약 가능')}>❓ 가이드</button>
         <button className={styles.resignButton} onClick={handleResign}>🏳️ 기권</button>
       </div>
     </div>

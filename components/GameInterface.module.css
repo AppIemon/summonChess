@@ -3,24 +3,24 @@
   flex-direction: column;
   align-items: center;
   width: 100%;
-  max-width: 1200px;
-  /* Increased to accommodate chat sidebar */
+  max-width: 1600px;
   margin: 0 auto;
   padding: 20px;
   min-height: 100vh;
   background: linear-gradient(135deg, #ffffff 0%, #f5f7fa 100%);
+  gap: 20px;
 }
 
 .header {
-  margin-bottom: 24px;
   text-align: center;
 }
 
 .header h2 {
-  font-size: 1.8rem;
-  font-weight: 700;
+  font-size: 2rem;
+  font-weight: 800;
   color: #1a1a2e;
   margin-bottom: 8px;
+  letter-spacing: -0.02em;
 }
 
 .status {
@@ -31,115 +31,140 @@
   align-items: center;
   justify-content: center;
   gap: 12px;
+  padding: 8px 20px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 40px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
-.check {
-  color: #e67e22;
-  font-weight: 700;
-}
-
-.mate {
-  color: #27ae60;
-  font-weight: 700;
-}
-
-.draw {
-  color: #7f8c8d;
-}
-
-.gameWrapper {
-  display: flex;
-  gap: 20px;
+.mainLayout {
+  display: grid;
+  grid-template-columns: 280px 1fr 320px;
+  gap: 30px;
   width: 100%;
-  justify-content: center;
-  flex-wrap: wrap;
+  height: calc(100vh - 200px);
+  min-height: 800px;
 }
 
-.gameLayout {
+/* Left Sidebar: Hand/Summons */
+.leftSidebar {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  width: min-content;
-  align-items: center;
+  gap: 20px;
 }
 
-.handWrapper {
+.sidebarSection {
+  background: white;
+  border-radius: 20px;
+  border: 1px solid #eee;
+  padding: 20px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
+  flex: 1;
+}
+
+.sidebarSection h3 {
+  font-size: 0.9rem;
+  color: #888;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+/* Center Area: Board + Timers */
+.centerArea {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+}
+
+.timerBar {
   width: 100%;
+  max-width: 700px;
+  display: flex;
+  justify-content: center;
 }
 
 .timer {
   background: #1a1a2e;
   color: #fff;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-family: 'Courier New', Courier, monospace;
-  font-size: 1.2rem;
-  font-weight: 700;
-  min-width: 80px;
+  padding: 10px 24px;
+  border-radius: 12px;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 1.5rem;
+  font-weight: 800;
+  min-width: 120px;
   text-align: center;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 30px rgba(26, 26, 46, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.1);
 }
 
 .timerLow {
   background: #e74c3c;
-  animation: pulse 1s infinite;
+  animation: timerPulse 0.5s infinite alternate;
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
-@keyframes pulse {
-  0% {
+@keyframes timerPulse {
+  from {
     transform: scale(1);
+    box-shadow: 0 0 20px rgba(231, 76, 60, 0.4);
   }
 
-  50% {
+  to {
     transform: scale(1.05);
-  }
-
-  100% {
-    transform: scale(1);
+    box-shadow: 0 0 35px rgba(231, 76, 60, 0.6);
   }
 }
 
-.opponentHand {
-  transform: rotate(180deg);
-  opacity: 0.7;
-}
-
-/* Chat Sidebar */
-.chatSidebar {
-  width: 300px;
-  height: 600px;
-  background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 16px;
+/* Right Sidebar: Chat */
+.rightSidebar {
   display: flex;
   flex-direction: column;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
+  height: 100%;
+}
+
+.chatSidebar {
+  width: 100%;
+  height: 100%;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 20px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
 }
 
 .chatMessages {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  background: #fafbfc;
 }
 
 .chatMessage {
-  padding: 8px 12px;
-  border-radius: 12px;
-  font-size: 0.9rem;
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 0.95rem;
   max-width: 85%;
   word-break: break-all;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.03);
 }
 
 .msgOther {
   align-self: flex-start;
-  background: #f0f2f5;
+  background: #fff;
   color: #1a1a2e;
+  border: 1px solid #eee;
 }
 
 .msgMe {
@@ -148,60 +173,61 @@
   color: #fff;
 }
 
-.senderName {
-  font-weight: 700;
-  font-size: 0.75rem;
-  margin-bottom: 2px;
-  display: block;
-}
-
 .chatInputArea {
-  padding: 12px;
+  padding: 16px;
+  background: white;
   border-top: 1px solid #eee;
   display: flex;
-  gap: 8px;
+  gap: 10px;
 }
 
 .chatInput {
   flex: 1;
-  padding: 10px 14px;
-  border: 1px solid #ddd;
-  border-radius: 20px;
-  font-size: 0.9rem;
+  padding: 12px 18px;
+  border: 1px solid #e0e0e0;
+  border-radius: 30px;
+  font-size: 0.95rem;
+  transition: all 0.2s;
 }
 
 .chatInput:focus {
   outline: none;
   border-color: #667eea;
+  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
 }
 
 .chatSendBtn {
   background: #667eea;
   color: #fff;
   border: none;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.2s;
+  transition: all 0.2s;
 }
 
 .chatSendBtn:hover {
-  transform: scale(1.1);
+  transform: translateY(-2px) rotate(15deg);
+  background: #5a6fd1;
 }
 
 .premoveNotice {
   background: #f1c40f;
   color: #1a1a2e;
-  padding: 4px 12px;
+  padding: 8px 20px;
   border-radius: 40px;
-  font-size: 0.8rem;
-  font-weight: 700;
-  margin-top: 8px;
+  font-size: 0.9rem;
+  font-weight: 800;
+  margin-top: 10px;
   animation: bounce 0.5s ease;
+  box-shadow: 0 4px 15px rgba(241, 196, 15, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 @keyframes bounce {
@@ -217,7 +243,7 @@
 }
 
 .controls {
-  margin-top: 24px;
+  margin-top: 20px;
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
@@ -226,32 +252,35 @@
 }
 
 .controls button {
-  padding: 12px 20px;
+  padding: 14px 28px;
   background: #fff;
   color: #1a1a2e;
-  border: 2px solid #ddd;
-  border-radius: 12px;
-  font-weight: 600;
+  border: 1px solid #e0e0e0;
+  border-radius: 14px;
+  font-weight: 700;
   transition: all 0.2s;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03);
 }
 
 .controls button:hover {
-  background: #f5f5f5;
+  background: #f8f9fa;
   border-color: #ccc;
   transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
 }
 
 .resignButton {
   background: #fff !important;
   color: #e74c3c !important;
-  border-color: #e74c3c !important;
+  border-color: rgba(231, 76, 60, 0.2) !important;
 }
 
 .resignButton:hover {
-  background: #fef5f5 !important;
+  background: #fff5f5 !important;
+  border-color: #e74c3c !important;
 }
 
-/* Checkmate Overlay - Mad Movie Effect */
+/* Checkmate Overlay */
 .checkmateOverlay {
   position: fixed;
   top: 0;
@@ -262,7 +291,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 2000;
   pointer-events: none;
 }
 
@@ -272,157 +301,36 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(255, 215, 0, 0.3));
+  background: white;
   animation: madMovieFlash 1s ease-out;
-  pointer-events: none;
 }
 
-.victoryContent {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-  z-index: 10;
-}
+@keyframes madMovieFlash {
+  0% {
+    opacity: 0;
+  }
 
-.crown {
-  font-size: 6rem;
-  animation: crownDrop 0.8s ease-out forwards;
-  filter: drop-shadow(0 10px 30px rgba(255, 215, 0, 0.5));
-}
+  10% {
+    opacity: 1;
+  }
 
-.victoryText {
-  font-size: 3rem;
-  font-weight: 900;
-  color: #1a1a2e;
-  animation: textReveal 0.8s ease-out 0.3s backwards;
-  text-transform: uppercase;
-}
-
-.winnerText {
-  font-size: 2rem;
-  font-weight: 700;
-  animation: textReveal 0.8s ease-out 0.6s backwards, glowPulse 2s ease-in-out 1.4s infinite;
-}
-
-.winnerWhite {
-  color: #667eea;
-}
-
-.winnerBlack {
-  color: #2d2d44;
-}
-
-/* Burst effects */
-.burstContainer {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-}
-
-.burst {
-  position: absolute;
-  width: 100px;
-  height: 100px;
-  border-radius: 50%;
-  animation: victoryBurst 1.5s ease-out forwards;
-}
-
-.burst1 {
-  background: radial-gradient(circle, rgba(255, 215, 0, 0.6) 0%, transparent 70%);
-  animation-delay: 0.1s;
-}
-
-.burst2 {
-  background: radial-gradient(circle, rgba(102, 126, 234, 0.6) 0%, transparent 70%);
-  animation-delay: 0.3s;
-}
-
-.burst3 {
-  background: radial-gradient(circle, rgba(167, 139, 250, 0.6) 0%, transparent 70%);
-  animation-delay: 0.5s;
-}
-
-/* Confetti */
-.confettiContainer {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  overflow: hidden;
-  z-index: 999;
-}
-
-.confetti {
-  position: absolute;
-  width: 10px;
-  height: 10px;
-  animation: confetti 3s ease-out forwards;
-}
-
-/* Loading state */
-.loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100vh;
-  gap: 16px;
-  color: #1a1a2e;
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid #eee;
-  border-top-color: #1a1a2e;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
+  100% {
+    opacity: 0;
   }
 }
 
-/* Error state */
-.errorContainer {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100vh;
-  gap: 16px;
-  text-align: center;
-  background: linear-gradient(135deg, #ffffff 0%, #f5f7fa 100%);
+.victoryContent {
+  animation: scaleIn 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
 
-.errorContainer h2 {
-  color: #e74c3c;
-  font-size: 1.5rem;
-}
+@keyframes scaleIn {
+  from {
+    transform: scale(0.5);
+    opacity: 0;
+  }
 
-.errorContainer p {
-  color: #666;
-}
-
-.errorContainer button {
-  padding: 12px 24px;
-  background: #1a1a2e;
-  color: #fff;
-  border: none;
-  border-radius: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.errorContainer button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px -8px rgba(26, 26, 46, 0.4);
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }

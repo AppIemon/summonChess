@@ -1,15 +1,10 @@
 .hand {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 16px;
-  background: #fff;
-  border-radius: 16px;
+  gap: 12px;
   min-height: 70px;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  border: 1px solid #eee;
+  align-items: flex-start;
+  justify-content: flex-start;
 }
 
 .item {
