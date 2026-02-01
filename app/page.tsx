@@ -149,19 +149,23 @@ export default function Home() {
           <h3>게임 규칙</h3>
           <ul>
             <li>
+              <span className={styles.ruleIcon}>👑</span>
+              게임은 킹 하나로 시작합니다.
+            </li>
+            <li>
               <span className={styles.ruleIcon}>♟️</span>
               자신의 차례에 기물을 소환하거나 이동할 수 있습니다.
             </li>
             <li>
               <span className={styles.ruleIcon}>✨</span>
-              자신의 기물의 이동 범위가 닿는 칸에만 소환 가능합니다. 폰은 1랭크와 8랭크에 소환할 수 없습니다.
+              자신의 기물이 닿는 칸에만 소환 가능합니다. 폰은 1·8랭크 불가.
             </li>
             <li>
               <span className={styles.ruleIcon}>💀</span>
               잡힌 기물은 다시 소환할 수 없습니다.
             </li>
             <li>
-              <span className={styles.ruleIcon}>👑</span>
+              <span className={styles.ruleIcon}>🏆</span>
               체크메이트로 승리하세요!
             </li>
           </ul>

@@ -12,17 +12,14 @@ export class SummonChessGame {
   private resignedBy?: PieceColor;
 
   constructor(fen?: string, whiteDeck?: PieceType[], blackDeck?: PieceType[], whitePlayerId?: string, blackPlayerId?: string) {
-    // Default setup: Kings and one pawn in front.
-    // White: King e1, Pawn e2.
-    // Black: King e8, Pawn e7.
-    // FEN: 4k3/4p3/8/8/8/8/4P3/4K3 w - - 0 1
-    this.chess = new Chess(fen || '4k3/4p3/8/8/8/8/4P3/4K3 w - - 0 1');
+    // Default setup: Kings only (no pawns)
+    // White: King e1
+    // Black: King e8
+    // FEN: 4k3/8/8/8/8/8/8/4K3 w - - 0 1
+    this.chess = new Chess(fen || '4k3/8/8/8/8/8/8/4K3 w - - 0 1');
 
     // Default Deck: 1 Queen, 2 Rooks, 2 Bishops, 2 Knights, 8 Pawns
-    // Since we start with 1 pawn on board, we reduce deck pawns to 7?
-    // User request: "Start with pawn in front of king". Usually implies these are the starting pieces.
-    // I will reduce the default pawn count by 1 (total 7 pawns in deck).
-    const defaultDeck: PieceType[] = ['q', 'r', 'r', 'b', 'b', 'n', 'n', 'p', 'p', 'p', 'p', 'p', 'p', 'p'];
+    const defaultDeck: PieceType[] = ['q', 'r', 'r', 'b', 'b', 'n', 'n', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'];
     this.whiteDeck = whiteDeck ? [...whiteDeck] : [...defaultDeck];
     this.blackDeck = blackDeck ? [...blackDeck] : [...defaultDeck];
     this.whitePlayerId = whitePlayerId;
