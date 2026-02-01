@@ -17,21 +17,42 @@ const ensureDir = () => {
   }
 }
 
+// Room info type
+interface RoomInfo {
+  roomCode: string;
+  hostId: string;
+  guestId?: string;
+  gameId?: string;
+  status: 'waiting' | 'playing' | 'finished';
+  createdAt: number;
+}
+
 // Declare global types
 const globalForStore = globalThis as unknown as {
   games: Map<string, SummonChessGame>;
-  waitingQueue: string[];
-  matchedGames: Map<string, string>;
+  rooms: Map<string, RoomInfo>;
 };
 
 const games = globalForStore.games || new Map<string, SummonChessGame>();
-const waitingQueue = globalForStore.waitingQueue || [];
-const matchedGames = globalForStore.matchedGames || new Map<string, string>();
+const rooms = globalForStore.rooms || new Map<string, RoomInfo>();
 
 if (process.env.NODE_ENV !== 'production') {
   globalForStore.games = games;
-  globalForStore.waitingQueue = waitingQueue;
-  globalForStore.matchedGames = matchedGames;
+  globalForStore.rooms = rooms;
+}
+
+// Generate 6-digit room code
+function generateRoomCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Excluding confusing chars
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  // Ensure unique
+  if (rooms.has(code)) {
+    return generateRoomCode();
+  }
+  return code;
 }
 
 // Persistence Helper
@@ -43,8 +64,10 @@ const persist = () => {
         id,
         data: (typeof game.serialize === 'function') ? game.serialize() : {}
       })),
-      waitingQueue,
-      matchedGames: Array.from(matchedGames.entries())
+      rooms: Array.from(rooms.entries()).map(([code, info]) => ({
+        code,
+        info
+      }))
     };
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
   } catch (e) {
@@ -53,7 +76,7 @@ const persist = () => {
 };
 
 const load = () => {
-  if (games.size > 0) return; // Already in memory
+  if (games.size > 0 || rooms.size > 0) return; // Already in memory
 
   ensureDir();
   if (fs.existsSync(DATA_FILE)) {
@@ -66,13 +89,12 @@ const load = () => {
           games.set(item.id, SummonChessGame.deserialize(item.data));
         });
       }
-      if (Array.isArray(data.waitingQueue)) {
-        data.waitingQueue.forEach((q: string) => waitingQueue.push(q));
+      if (Array.isArray(data.rooms)) {
+        data.rooms.forEach((item: any) => {
+          rooms.set(item.code, item.info);
+        });
       }
-      if (Array.isArray(data.matchedGames)) {
-        data.matchedGames.forEach(([k, v]: [string, string]) => matchedGames.set(k, v));
-      }
-      console.log(`Loaded ${games.size} games from disk.`);
+      console.log(`Loaded ${games.size} games, ${rooms.size} rooms from disk.`);
     } catch (e) {
       console.error("Failed to load game store", e);
     }
@@ -83,8 +105,9 @@ const load = () => {
 load();
 
 export const GameStore = {
-  createGame: (id: string) => {
-    const game = new SummonChessGame();
+  // Game management
+  createGame: (id: string, whitePlayerId?: string, blackPlayerId?: string) => {
+    const game = new SummonChessGame(undefined, undefined, undefined, whitePlayerId, blackPlayerId);
     games.set(id, game);
     persist();
     return game;
@@ -96,38 +119,115 @@ export const GameStore = {
     games.set(id, game);
     persist();
   },
-  joinQueue: (playerId: string): { status: 'queued' | 'matched', gameId?: string } => {
-    if (matchedGames.has(playerId)) {
-      return { status: 'matched', gameId: matchedGames.get(playerId) };
-    }
-
-    if (waitingQueue.includes(playerId)) {
-      return { status: 'queued' };
-    }
-
-    if (waitingQueue.length > 0) {
-      const opponentId = waitingQueue.shift()!;
-      if (opponentId === playerId) return { status: 'queued' };
-
-      const gameId = crypto.randomUUID();
-      const game = new SummonChessGame(undefined, undefined, undefined, opponentId, playerId);
-      games.set(gameId, game);
-
-      matchedGames.set(playerId, gameId);
-      matchedGames.set(opponentId, gameId);
-
-      persist();
-      return { status: 'matched', gameId };
-    } else {
-      waitingQueue.push(playerId);
-      persist();
-      return { status: 'queued' };
-    }
+  deleteGame: (id: string) => {
+    games.delete(id);
+    persist();
   },
-  checkStatus: (playerId: string): { status: 'queued' | 'matched', gameId?: string } => {
-    if (matchedGames.has(playerId)) {
-      return { status: 'matched', gameId: matchedGames.get(playerId) };
+
+  // Room management
+  createRoom: (hostId: string): RoomInfo => {
+    const roomCode = generateRoomCode();
+    const roomInfo: RoomInfo = {
+      roomCode,
+      hostId,
+      status: 'waiting',
+      createdAt: Date.now()
+    };
+    rooms.set(roomCode, roomInfo);
+    persist();
+    return roomInfo;
+  },
+
+  getRoom: (roomCode: string): RoomInfo | undefined => {
+    return rooms.get(roomCode.toUpperCase());
+  },
+
+  joinRoom: (roomCode: string, guestId: string): { success: boolean; error?: string; room?: RoomInfo } => {
+    const code = roomCode.toUpperCase();
+    const room = rooms.get(code);
+
+    if (!room) {
+      return { success: false, error: '방을 찾을 수 없습니다.' };
     }
-    return { status: 'queued' };
+
+    if (room.status !== 'waiting') {
+      return { success: false, error: '이미 게임이 시작되었습니다.' };
+    }
+
+    if (room.hostId === guestId) {
+      return { success: false, error: '자신의 방에 참가할 수 없습니다.' };
+    }
+
+    if (room.guestId && room.guestId !== guestId) {
+      return { success: false, error: '이미 다른 플레이어가 참가했습니다.' };
+    }
+
+    // Join the room
+    room.guestId = guestId;
+    persist();
+
+    return { success: true, room };
+  },
+
+  startGame: (roomCode: string): { success: boolean; error?: string; gameId?: string } => {
+    const code = roomCode.toUpperCase();
+    const room = rooms.get(code);
+
+    if (!room) {
+      return { success: false, error: '방을 찾을 수 없습니다.' };
+    }
+
+    if (!room.guestId) {
+      return { success: false, error: '대기 중인 플레이어가 입장해야 합니다.' };
+    }
+
+    if (room.status === 'playing' && room.gameId) {
+      return { success: true, gameId: room.gameId };
+    }
+
+    // Create the game (host is white, guest is black)
+    const gameId = crypto.randomUUID();
+    const game = new SummonChessGame(undefined, undefined, undefined, room.hostId, room.guestId);
+    games.set(gameId, game);
+
+    room.gameId = gameId;
+    room.status = 'playing';
+    persist();
+
+    return { success: true, gameId };
+  },
+
+  leaveRoom: (roomCode: string, playerId: string): void => {
+    const code = roomCode.toUpperCase();
+    const room = rooms.get(code);
+
+    if (!room) return;
+
+    if (room.hostId === playerId) {
+      // Host left, delete the room
+      rooms.delete(code);
+    } else if (room.guestId === playerId) {
+      // Guest left
+      room.guestId = undefined;
+    }
+    persist();
+  },
+
+  deleteRoom: (roomCode: string): void => {
+    rooms.delete(roomCode.toUpperCase());
+    persist();
+  },
+
+  // Cleanup old rooms (optional)
+  cleanupOldRooms: () => {
+    const now = Date.now();
+    const maxAge = 60 * 60 * 1000; // 1 hour
+
+    for (const [code, room] of rooms.entries()) {
+      if (now - room.createdAt > maxAge && room.status === 'waiting') {
+        rooms.delete(code);
+      }
+    }
+    persist();
   }
 };

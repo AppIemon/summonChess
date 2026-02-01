@@ -2,114 +2,170 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import styles from './page.module.css'; // We need to create this or use inline
+import styles from './page.module.css';
 
 export default function Home() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [matchStatus, setMatchStatus] = useState<string>('');
+  const [roomCode, setRoomCode] = useState('');
+  const [showJoinInput, setShowJoinInput] = useState(false);
+  const [error, setError] = useState('');
 
-  // const createGame = async () => { ... } // Removed
-
-  const findMatch = async () => {
-    setLoading(true);
-    setMatchStatus('상대를 찾는 중...');
-
-    // Generate random player ID if not exists
-    let playerId = localStorage.getItem('playerId');
-    if (!playerId) {
-      playerId = crypto.randomUUID();
-      localStorage.setItem('playerId', playerId);
+  // Get or create player ID
+  const getPlayerId = () => {
+    let id = localStorage.getItem('playerId');
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem('playerId', id);
     }
+    return id;
+  };
+
+  // Create a new room
+  const createRoom = async () => {
+    setLoading(true);
+    setError('');
 
     try {
-      // Join Queue
-      const joinRes = await fetch('/api/match', {
+      const playerId = getPlayerId();
+      const res = await fetch('/api/room', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId }),
       });
 
-      if (!joinRes.ok) {
-        console.error("Match join failed", joinRes.status);
-        throw new Error("Match join failed");
+      if (!res.ok) {
+        throw new Error('Failed to create room');
       }
 
-      const joinData = await joinRes.json();
-      console.log("Join Data:", joinData);
-
-      if (joinData.status === 'matched') {
-        router.push(`/game/${joinData.gameId}`);
-        return;
+      const data = await res.json();
+      if (data.success && data.roomCode) {
+        router.push(`/room/${data.roomCode}`);
+      } else {
+        throw new Error(data.error || 'Unknown error');
       }
-
-      // Poll
-      const poll = setInterval(async () => {
-        try {
-          const checkRes = await fetch(`/api/match?playerId=${playerId}`);
-          if (!checkRes.ok) throw new Error("Poll failed");
-          const checkData = await checkRes.json();
-
-          if (checkData.status === 'matched') {
-            clearInterval(poll);
-            router.push(`/game/${checkData.gameId}`);
-          }
-        } catch (pollErr) {
-          console.error("Poll error", pollErr);
-          // Don't stop polling immediately on transient error, but could fail eventually
-        }
-      }, 1000);
-
     } catch (e) {
-      console.error(e);
-      setMatchStatus('매칭 찾기 오류');
+      console.error('Create room error:', e);
+      setError('방 생성에 실패했습니다.');
+    } finally {
       setLoading(false);
-      alert("매칭 중 오류가 발생했습니다.");
     }
   };
 
+  // Join existing room
+  const joinRoom = () => {
+    if (!roomCode.trim()) {
+      setError('방 코드를 입력해주세요.');
+      return;
+    }
+
+    setError('');
+    router.push(`/room/${roomCode.trim().toUpperCase()}`);
+  };
+
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '100vh',
-      gap: '20px'
-    }}>
-      <h1 style={{ fontSize: '3rem', fontWeight: 'bold' }}>소환 체스</h1>
-      <p style={{ color: '#666', maxWidth: '600px', textAlign: 'center', wordBreak: 'keep-all' }}>
-        기존 체스에 소환 시스템을 더했습니다. 킹 하나로 시작하여 당신의 군대를 전장에 소환하세요.
-      </p>
+    <div className={styles.container}>
+      <div className={styles.content}>
+        {/* Logo & Title */}
+        <div className={styles.header}>
+          <div className={styles.logo}>♔♚</div>
+          <h1 className={styles.title}>소환 체스</h1>
+          <p className={styles.subtitle}>
+            기존 체스에 소환 시스템을 더했습니다.<br />
+            킹 하나로 시작하여 당신의 군대를 전장에 소환하세요.
+          </p>
+        </div>
 
-      <div style={{ display: 'flex', gap: '10px' }}>
-        <button
-          onClick={findMatch}
-          disabled={loading}
-          style={{
-            padding: '15px 30px',
-            fontSize: '1.2rem',
-            background: '#000',
-            color: '#fff',
-            borderRadius: '8px',
-            border: 'none',
-            cursor: 'pointer'
-          }}
-        >
-          {loading && matchStatus ? matchStatus : '온라인 매칭 찾기'}
-        </button>
-      </div>
+        {/* Action Buttons */}
+        <div className={styles.actions}>
+          {!showJoinInput ? (
+            <>
+              <button
+                className={styles.primaryButton}
+                onClick={createRoom}
+                disabled={loading}
+              >
+                {loading ? (
+                  <span className={styles.buttonLoading}>
+                    <span className={styles.spinner}></span>
+                    방 생성 중...
+                  </span>
+                ) : (
+                  <>
+                    <span className={styles.buttonIcon}>➕</span>
+                    방 만들기
+                  </>
+                )}
+              </button>
 
-      <div style={{ marginTop: '40px', textAlign: 'center', color: '#888', fontSize: '0.9rem' }}>
-        <p>규칙:</p>
-        <ul style={{ listStyle: 'none', padding: 0 }}>
-          <li>턴: 이동 또는 소환</li>
-          <li>기물을 자신의 진영에 소환하세요.</li>
-          <li>죽은 기물은 영구적으로 제거됩니다.</li>
-          <li>체크메이트로 승리하세요.</li>
-        </ul>
+              <button
+                className={styles.secondaryButton}
+                onClick={() => setShowJoinInput(true)}
+                disabled={loading}
+              >
+                <span className={styles.buttonIcon}>🚪</span>
+                방 참가하기
+              </button>
+            </>
+          ) : (
+            <div className={styles.joinSection}>
+              <input
+                type="text"
+                className={styles.roomInput}
+                placeholder="방 코드 입력 (예: ABC123)"
+                value={roomCode}
+                onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                maxLength={6}
+                autoFocus
+                onKeyDown={(e) => e.key === 'Enter' && joinRoom()}
+              />
+              <div className={styles.joinButtons}>
+                <button
+                  className={styles.primaryButton}
+                  onClick={joinRoom}
+                >
+                  참가
+                </button>
+                <button
+                  className={styles.cancelButton}
+                  onClick={() => {
+                    setShowJoinInput(false);
+                    setRoomCode('');
+                    setError('');
+                  }}
+                >
+                  취소
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Error Message */}
+        {error && <p className={styles.error}>{error}</p>}
+
+        {/* Rules */}
+        <div className={styles.rules}>
+          <h3>게임 규칙</h3>
+          <ul>
+            <li>
+              <span className={styles.ruleIcon}>♟️</span>
+              턴마다 이동 또는 소환 중 하나를 선택
+            </li>
+            <li>
+              <span className={styles.ruleIcon}>✨</span>
+              자신의 기물이 도달할 수 있는 빈 칸에 소환 가능
+            </li>
+            <li>
+              <span className={styles.ruleIcon}>💀</span>
+              잡힌 기물은 영구적으로 제거됨
+            </li>
+            <li>
+              <span className={styles.ruleIcon}>👑</span>
+              체크메이트로 승리
+            </li>
+          </ul>
+        </div>
       </div>
     </div>
   );
