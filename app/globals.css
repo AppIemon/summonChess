@@ -8,13 +8,23 @@ html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 body {
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
-  color: #fff;
+  background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
+  color: #1a1a2e;
   min-height: 100vh;
+}
+
+/* Chess board color variables */
+:root {
+  --board-light: #f0d9b5;
+  --board-dark: #b58863;
+  --accent: #667eea;
+  --accent-light: #a78bfa;
+  --neon-white: rgba(255, 255, 255, 0.9);
+  --neon-black: rgba(80, 80, 120, 0.9);
 }
 
 a {
@@ -24,6 +34,9 @@ a {
 
 button {
   font-family: inherit;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s ease;
 }
 
 /* Scrollbar styling */
@@ -32,14 +45,196 @@ button {
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.05);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.15);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* Neon glow animations */
+@keyframes neonPulseWhite {
+
+  0%,
+  100% {
+    filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.8)) drop-shadow(0 0 6px rgba(200, 200, 255, 0.6));
+  }
+
+  50% {
+    filter: drop-shadow(0 0 6px rgba(255, 255, 255, 1)) drop-shadow(0 0 12px rgba(200, 200, 255, 0.8)) drop-shadow(0 0 18px rgba(150, 150, 255, 0.4));
+  }
+}
+
+@keyframes neonPulseBlack {
+
+  0%,
+  100% {
+    filter: drop-shadow(0 0 3px rgba(60, 60, 100, 0.8)) drop-shadow(0 0 6px rgba(80, 60, 120, 0.6));
+  }
+
+  50% {
+    filter: drop-shadow(0 0 6px rgba(80, 60, 120, 1)) drop-shadow(0 0 12px rgba(100, 80, 150, 0.8)) drop-shadow(0 0 18px rgba(120, 100, 180, 0.4));
+  }
+}
+
+/* Checkmate Mad Movie Effect */
+@keyframes madMovieZoom {
+  0% {
+    transform: scale(1);
+  }
+
+  10% {
+    transform: scale(1.05);
+  }
+
+  20% {
+    transform: scale(0.98);
+  }
+
+  30% {
+    transform: scale(1.08);
+  }
+
+  50% {
+    transform: scale(1);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes madMovieFlash {
+
+  0%,
+  100% {
+    opacity: 0;
+  }
+
+  5%,
+  15%,
+  25% {
+    opacity: 0.3;
+  }
+
+  10%,
+  20% {
+    opacity: 0;
+  }
+}
+
+@keyframes victoryBurst {
+  0% {
+    transform: scale(0) rotate(0deg);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.5) rotate(180deg);
+    opacity: 0.8;
+  }
+
+  100% {
+    transform: scale(2) rotate(360deg);
+    opacity: 0;
+  }
+}
+
+@keyframes confetti {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateY(100vh) rotate(720deg);
+    opacity: 0;
+  }
+}
+
+@keyframes shakeBoard {
+
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  10%,
+  30%,
+  50%,
+  70%,
+  90% {
+    transform: translateX(-5px);
+  }
+
+  20%,
+  40%,
+  60%,
+  80% {
+    transform: translateX(5px);
+  }
+}
+
+@keyframes crownDrop {
+  0% {
+    transform: translateY(-100px) rotate(-20deg);
+    opacity: 0;
+  }
+
+  60% {
+    transform: translateY(10px) rotate(5deg);
+    opacity: 1;
+  }
+
+  80% {
+    transform: translateY(-5px) rotate(-3deg);
+  }
+
+  100% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+@keyframes textReveal {
+  0% {
+    opacity: 0;
+    transform: scale(0.5) translateY(20px);
+    letter-spacing: 0.5em;
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.1) translateY(-5px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    letter-spacing: 0.1em;
+  }
+}
+
+@keyframes glowPulse {
+
+  0%,
+  100% {
+    text-shadow:
+      0 0 10px currentColor,
+      0 0 20px currentColor,
+      0 0 30px currentColor;
+  }
+
+  50% {
+    text-shadow:
+      0 0 20px currentColor,
+      0 0 40px currentColor,
+      0 0 60px currentColor,
+      0 0 80px currentColor;
+  }
 }

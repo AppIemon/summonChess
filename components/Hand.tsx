@@ -21,7 +21,8 @@ export default function Hand({
   className,
   disabled
 }: HandProps) {
-  if (!pieces) return null; // Safety check
+  if (!pieces) return null;
+
   // Group pieces by type
   const counts = pieces.reduce((acc, p) => {
     acc[p] = (acc[p] || 0) + 1;
@@ -45,12 +46,17 @@ export default function Hand({
             })}
             onClick={() => !disabled && onSelect(selectedPiece === type ? null : type)}
           >
-            <PieceComponent className={styles.piece} />
+            <PieceComponent
+              className={clsx(
+                styles.piece,
+                color === 'w' ? styles.pieceWhite : styles.pieceBlack
+              )}
+            />
             <span className={styles.count}>{counts[type]}</span>
           </div>
         );
       })}
-      {uniquePieces.length === 0 && <span style={{ fontSize: '12px', color: '#999' }}>빈 덱</span>}
+      {uniquePieces.length === 0 && <span className={styles.emptyDeck}>빈 덱</span>}
     </div>
   );
 }

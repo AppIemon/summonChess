@@ -150,19 +150,19 @@ export default function Home() {
           <ul>
             <li>
               <span className={styles.ruleIcon}>♟️</span>
-              턴마다 이동 또는 소환 중 하나를 선택
+              자신의 차례에 기물을 소환하거나 이동할 수 있습니다.
             </li>
             <li>
               <span className={styles.ruleIcon}>✨</span>
-              자신의 기물이 도달할 수 있는 빈 칸에 소환 가능
+              자신의 기물의 이동 범위가 닿는 칸에만 소환 가능합니다. 폰은 1랭크와 8랭크에 소환할 수 없습니다.
             </li>
             <li>
               <span className={styles.ruleIcon}>💀</span>
-              잡힌 기물은 영구적으로 제거됨
+              잡힌 기물은 다시 소환할 수 없습니다.
             </li>
             <li>
               <span className={styles.ruleIcon}>👑</span>
-              체크메이트로 승리
+              체크메이트로 승리하세요!
             </li>
           </ul>
         </div>
