@@ -35,13 +35,12 @@ const globalForStore = globalThis as unknown as {
   rooms: Map<string, RoomInfo>;
 };
 
-const games = globalForStore.games || new Map<string, SummonChessGame>();
-const rooms = globalForStore.rooms || new Map<string, RoomInfo>();
+// Always use globalThis to persist store across HMR in dev and better handle instance sharing
+globalForStore.games = globalForStore.games || new Map<string, SummonChessGame>();
+globalForStore.rooms = globalForStore.rooms || new Map<string, RoomInfo>();
 
-if (process.env.NODE_ENV !== 'production') {
-  globalForStore.games = games;
-  globalForStore.rooms = rooms;
-}
+const games = globalForStore.games;
+const rooms = globalForStore.rooms;
 
 // Generate 6-digit room code
 function generateRoomCode(): string {

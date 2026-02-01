@@ -192,24 +192,33 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
     }
   }, [gameState?.turn, myColor]);
 
-  if (error) {
+  // Error handling: Only show full error screen if we don't have existing state and it's a definitive error
+  const isFetchingInitial = !gameState && !error;
+  const isErrorDefinitive = error && (!gameState || error.status === 404);
+
+  if (isErrorDefinitive) {
     return (
       <div className={styles.errorContainer}>
-        <h2>게임을 찾을 수 없습니다</h2>
+        <h2>{error.status === 404 ? '게임을 찾을 수 없습니다' : '통신 오류가 발생했습니다'}</h2>
         <p>게임이 종료되었거나 유효하지 않은 링크입니다.</p>
         <button onClick={() => window.location.href = '/'}>홈으로 돌아가기</button>
       </div>
     );
   }
 
-  if (!gameState) {
+  if (isFetchingInitial) {
     return (
       <div className={styles.loading}>
         <div className={styles.spinner}></div>
-        <p>로딩 중...</p>
+        <p>게임을 불러오는 중...</p>
       </div>
     );
   }
+
+  // If we reach here, we have a gameState but maybe a background error
+  const connectionLost = !!(error && gameState);
+
+  if (!gameState) return null; // Should be handled by isFetchingInitial above, but for TS completeness
 
   const handleSquareClick = async (square: string) => {
     if (gameState.winner) return;
@@ -364,6 +373,11 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
 
       <div className={styles.header}>
         <h2>소환 체스</h2>
+        {connectionLost && (
+          <div style={{ color: '#e74c3c', fontSize: '0.8rem', fontWeight: 'bold' }}>
+            🛰️ 연결 상태 불안정 (재연결 시도 중...)
+          </div>
+        )}
         <div className={styles.status}>
           <span>차례: {gameState.turn === 'w' ? '⚪ 백' : '⚫ 흑'}</span>
           {gameState.isCheck && <span className={styles.check}>⚠️ 체크!</span>}
