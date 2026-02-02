@@ -17,6 +17,11 @@ interface Move {
   enPassant: boolean;
 }
 
+// Transposition Table flags
+const TT_EXACT = 0;
+const TT_ALPHA = 1; // Upper bound (Fail-low)
+const TT_BETA = 2;  // Lower bound (Fail-high)
+
 interface TTEntry {
   hash: bigint;
   depth: number;
@@ -279,54 +284,100 @@ class AiGameState {
       if (this.board[i] === KING * color) { kingPos = i; break; }
     }
     if (kingPos === -1) return false;
-    return this.getSummonMask(-color)[kingPos];
+    return this.isSquareAttacked(kingPos, -color);
+  }
+
+  isSquareAttacked(sq: number, color: number): boolean {
+    const x = sq % 8, y = Math.floor(sq / 8);
+    // Pawns
+    const dy = color === WHITE ? 1 : -1;
+    for (const dx of [-1, 1]) {
+      const nx = x - dx, ny = y - dy; // Look back to where an attacker would be
+      if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
+        if (this.board[ny * 8 + nx] === PAWN * color) return true;
+      }
+    }
+    // Knights
+    const nDx = [1, 2, 2, 1, -1, -2, -2, -1], nDy = [2, 1, -1, -2, -2, -1, 1, 2];
+    for (let k = 0; k < 8; k++) {
+      const nx = x + nDx[k], ny = y + nDy[k];
+      if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
+        if (this.board[ny * 8 + nx] === KNIGHT * color) return true;
+      }
+    }
+    // King
+    const kDx = [1, 1, 1, 0, 0, -1, -1, -1], kDy = [1, 0, -1, 1, -1, 1, 0, -1];
+    for (let k = 0; k < 8; k++) {
+      const nx = x + kDx[k], ny = y + kDy[k];
+      if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
+        if (this.board[ny * 8 + nx] === KING * color) return true;
+      }
+    }
+    // Sliders
+    const dirs = [[0, 1], [0, -1], [-1, 0], [1, 0], [-1, 1], [1, 1], [-1, -1], [1, -1]];
+    for (let d = 0; d < 8; d++) {
+      const dx = dirs[d][0], dy = dirs[d][1];
+      for (let s = 1; s < 8; s++) {
+        const nx = x + dx * s, ny = y + dy * s;
+        if (nx < 0 || nx > 7 || ny < 0 || ny > 7) break;
+        const p = this.board[ny * 8 + nx];
+        if (p !== 0) {
+          if (p === QUEEN * color) return true;
+          if (d < 4 && p === ROOK * color) return true;
+          if (d >= 4 && p === BISHOP * color) return true;
+          break;
+        }
+      }
+    }
+    return false;
   }
 
   evaluate(): number {
     let score = 0;
 
     // 1. Piece Material & Position
+    let whiteMaterial = 0;
+    let blackMaterial = 0;
+
     for (let i = 0; i < 64; i++) {
       if (this.board[i] === 0) continue;
       const p = Math.abs(this.board[i]);
       const x = i % 8, y = Math.floor(i / 8);
-      const side = this.board[i] > 0 ? 1 : -1;
+      const side = this.board[i] > 0 ? WHITE : BLACK;
 
       let v = PIECE_VALS[p];
 
       // Promotion bonus
       if (p === PAWN) {
-        if ((side === WHITE && y === 6) || (side === BLACK && y === 1)) v += 150;
+        if ((side === WHITE && y === 6) || (side === BLACK && y === 1)) v += 100;
+        if ((side === WHITE && y === 5) || (side === BLACK && y === 2)) v += 30;
       }
 
-      // Center control bonus (squares d4, d5, e4, e5 are index 27,28,35,36)
+      // Center control bonus
       const distToCenter = Math.max(Math.abs(x - 3.5), Math.abs(y - 3.5));
       v += (4 - distToCenter) * 10;
 
-      score += side * v;
+      if (side === WHITE) whiteMaterial += v;
+      else blackMaterial += v;
     }
 
-    // 2. Reserve Material - Slightly higher weight (1.1x) to encourage conservation
+    score = whiteMaterial - blackMaterial;
+
+    // 2. Reserve Material - Slightly higher weight to encourage conservation
     for (let p = 1; p <= 5; p++) {
-      score += this.reserve[1][p] * PIECE_VALS[p] * 1.1;
-      score -= this.reserve[0][p] * PIECE_VALS[p] * 1.1;
+      score += this.reserve[1][p] * PIECE_VALS[p] * 1.05;
+      score -= this.reserve[0][p] * PIECE_VALS[p] * 1.05;
     }
 
-    // 3. Mobility & Control
-    const mobility = this.generateMoves().length;
-    score += (this.turn === WHITE ? 1 : -1) * mobility * 5;
+    // 3. Move logic penalty/bonus
+    // (Removed expensive mobility check)
 
     // 4. Check & King Safety
-    // Check is VERY good for the side that made it
     const whiteInCheck = this.isInCheck(WHITE);
     const blackInCheck = this.isInCheck(BLACK);
 
-    if (whiteInCheck) score -= 120;
-    if (blackInCheck) score += 120;
-
-    // Extra bonus for "Check if I can"
-    // This is already reflected slightly in material but Let's add more
-    // if opponent is in check, it gives us tempo
+    if (whiteInCheck) score -= 150;
+    if (blackInCheck) score += 150;
 
     return this.turn === WHITE ? score : -score;
   }
@@ -338,9 +389,9 @@ function scoreMove(gs: AiGameState, m: Move): number {
   if (m.type === 'SUMMON') return 20; // Slightly higher base for summons
   let score = 0;
 
-  // Captures
+  // Captures: MVV/LVA
   if (m.captured) {
-    score = 1000 + (Math.abs(m.captured) * 10) - Math.abs(gs.board[m.from]);
+    score = 1000 + (PIECE_VALS[Math.abs(m.captured)] * 10) - PIECE_VALS[m.piece];
   }
 
   // Promotions
@@ -383,10 +434,9 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number):
   const hashIdx = Number(gs.currentHash % BigInt(TT_SIZE));
   const entry = TT[hashIdx];
   if (entry && entry.hash === gs.currentHash && entry.depth >= depth) {
-    if (entry.flag === 0) return entry.score;
-    if (entry.flag === 1) alpha = Math.max(alpha, entry.score);
-    else beta = Math.min(beta, entry.score);
-    if (alpha >= beta) return entry.score;
+    if (entry.flag === TT_EXACT) return entry.score;
+    if (entry.flag === TT_ALPHA && entry.score <= alpha) return alpha;
+    if (entry.flag === TT_BETA && entry.score >= beta) return beta;
   }
 
   const moves = gs.generateMoves();
@@ -419,12 +469,12 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number):
       bestM = m;
     }
     if (val >= beta) {
-      TT[hashIdx] = { hash: gs.currentHash, depth, score: val, flag: 2, bestMove: m };
+      TT[hashIdx] = { hash: gs.currentHash, depth, score: val, flag: TT_BETA, bestMove: m };
       return val;
     }
     if (val > alpha) {
       alpha = val;
-      flag = 0;
+      flag = TT_EXACT;
     }
   }
 
