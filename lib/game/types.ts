@@ -32,6 +32,7 @@ export interface GameState {
   blackTime: number; // in seconds
   isTimeout: boolean;
   chat: ChatMessage[];
+  roomCode?: string;
 }
 
 export interface MoveAction {

@@ -16,8 +16,9 @@ export class SummonChessGame {
   private lastActionTimestamp: number;
   private chat: ChatMessage[] = [];
   private isTimeout: boolean = false;
+  private historyList: string[] = [];
 
-  constructor(fen?: string, whiteDeck?: PieceType[], blackDeck?: PieceType[], whitePlayerId?: string, blackPlayerId?: string) {
+  constructor(fen?: string, whiteDeck?: PieceType[], blackDeck?: PieceType[], whitePlayerId?: string, blackPlayerId?: string, historyList?: string[]) {
     this.chess = new Chess(fen || '4k3/8/8/8/8/8/8/4K3 w - - 0 1');
     const defaultDeck: PieceType[] = ['q', 'r', 'r', 'b', 'b', 'n', 'n', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'];
     this.whiteDeck = whiteDeck ? [...whiteDeck] : [...defaultDeck];
@@ -25,6 +26,7 @@ export class SummonChessGame {
     this.whitePlayerId = whitePlayerId;
     this.blackPlayerId = blackPlayerId;
     this.lastActionTimestamp = Date.now();
+    if (historyList) this.historyList = [...historyList];
   }
 
   public getState(): GameState {
@@ -58,7 +60,7 @@ export class SummonChessGame {
       isDraw: isDraw,
       isStalemate: this.checkStalemate(),
       winner: this.calculateWinner(currentIsTimeout, currentWhiteTime, currentBlackTime),
-      history: this.chess.history(),
+      history: [...this.historyList],
       lastMove: this.lastMove,
       whitePlayerId: this.whitePlayerId,
       blackPlayerId: this.blackPlayerId,
@@ -131,6 +133,7 @@ export class SummonChessGame {
         });
         if (move) {
           this.lastMove = { from: move.from, to: move.to };
+          this.historyList.push(move.san);
           return { success: true };
         }
       } catch (e) {
@@ -175,6 +178,10 @@ export class SummonChessGame {
 
     this.chess.load(parts.join(' '));
     this.lastMove = { from: '@', to: square };
+
+    // Add to history
+    this.historyList.push(`${piece.toUpperCase()}@${square}`);
+
     return { success: true };
   }
 
@@ -240,11 +247,12 @@ export class SummonChessGame {
       whitePlayerId: this.whitePlayerId, blackPlayerId: this.blackPlayerId,
       resignedBy: this.resignedBy, whiteTime: this.whiteTime, blackTime: this.blackTime,
       lastActionTimestamp: this.lastActionTimestamp, chat: this.chat, isTimeout: this.isTimeout,
+      historyList: this.historyList,
     };
   }
 
   static deserialize(data: any): SummonChessGame {
-    const game = new SummonChessGame(data.fen, data.whiteDeck, data.blackDeck, data.whitePlayerId, data.blackPlayerId);
+    const game = new SummonChessGame(data.fen, data.whiteDeck, data.blackDeck, data.whitePlayerId, data.blackPlayerId, data.historyList);
     if (data.resignedBy) game.resignedBy = data.resignedBy;
     if (data.whiteTime !== undefined) game.whiteTime = data.whiteTime;
     if (data.blackTime !== undefined) game.blackTime = data.blackTime;

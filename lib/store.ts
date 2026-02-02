@@ -1,29 +1,45 @@
 import { SummonChessGame } from './game/engine';
 import fs from 'fs';
 import path from 'path';
+import { Tier, getTier } from './rating';
 
 // Storage setup
 const DATA_DIR = path.join(process.cwd(), '.data');
 const DATA_FILE = path.join(DATA_DIR, 'store.json');
 
 // Helper to ensure dir exists
-const ensureDir = () => {
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-  } catch (e) {
-    console.error("Failed to ensure data dir", e);
+function ensureDir() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
   }
 }
 
+export interface User {
+  id: string;
+  nickname: string; // e.g. "Player #1234" or "User <ID>"
+  elo: number;
+  gamesPlayed: number;
+  tier: Tier;
+  createdAt: number;
+}
+
+export interface Spectator {
+  id: string;
+  nickname: string;
+  elo?: number;
+  tier?: Tier;
+}
+
 // Room info type
-interface RoomInfo {
+export interface RoomInfo {
   roomCode: string;
   hostId: string;
   hostNickname: string;
+  hostElo?: number;
   guestId?: string;
   guestNickname?: string;
+  guestElo?: number;
+  spectators: Spectator[]; // Now includes elo info if available
   gameId?: string;
   status: 'waiting' | 'playing' | 'finished';
   createdAt: number;
@@ -33,204 +49,312 @@ interface RoomInfo {
 const globalForStore = globalThis as unknown as {
   games: Map<string, SummonChessGame>;
   rooms: Map<string, RoomInfo>;
+  users: Map<string, User>;
+  matchQueue: string[]; // List of user IDs waiting for match
 };
 
 // Always use globalThis to persist store across HMR in dev and better handle instance sharing
 globalForStore.games = globalForStore.games || new Map<string, SummonChessGame>();
 globalForStore.rooms = globalForStore.rooms || new Map<string, RoomInfo>();
+globalForStore.users = globalForStore.users || new Map<string, User>();
+globalForStore.matchQueue = globalForStore.matchQueue || [];
 
 const games = globalForStore.games;
 const rooms = globalForStore.rooms;
+const users = globalForStore.users;
+const matchQueue = globalForStore.matchQueue;
 
 // Generate 6-digit room code
 function generateRoomCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Excluding confusing chars
-  let code = '';
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
   for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  // Ensure unique
-  if (rooms.has(code)) {
-    return generateRoomCode();
-  }
-  return code;
+  return result;
 }
 
 // Persistence Helper
-const persist = () => {
-  ensureDir();
+function persist() {
   try {
+    ensureDir();
     const data = {
-      games: Array.from(games.entries()).map(([id, game]) => ({
-        id,
-        data: (typeof game.serialize === 'function') ? game.serialize() : {}
-      })),
-      rooms: Array.from(rooms.entries()).map(([code, info]) => ({
-        code,
-        info
-      }))
+      rooms: Array.from(rooms.entries()),
+      // Don't persist games (too large/complex object), only rooms and users
+      users: Array.from(users.entries()),
     };
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
   } catch (e) {
-    console.error("Failed to persist game store", e);
+    console.error('Failed to persist store:', e);
   }
-};
+}
 
-const load = () => {
-  if (games.size > 0 || rooms.size > 0) return; // Already in memory
-
-  ensureDir();
-  if (fs.existsSync(DATA_FILE)) {
-    try {
+function load() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
       const raw = fs.readFileSync(DATA_FILE, 'utf-8');
       const data = JSON.parse(raw);
 
-      if (Array.isArray(data.games)) {
-        data.games.forEach((item: any) => {
-          games.set(item.id, SummonChessGame.deserialize(item.data));
+      if (data.rooms) {
+        data.rooms.forEach(([key, val]: [string, RoomInfo]) => {
+          rooms.set(key, val);
         });
       }
-      if (Array.isArray(data.rooms)) {
-        data.rooms.forEach((item: any) => {
-          rooms.set(item.code, item.info);
+
+      if (data.users) {
+        data.users.forEach(([key, val]: [string, User]) => {
+          users.set(key, val);
         });
       }
-      console.log(`Loaded ${games.size} games, ${rooms.size} rooms from disk.`);
-    } catch (e) {
-      console.error("Failed to load game store", e);
     }
+  } catch (e) {
+    console.error('Failed to load store:', e);
   }
-};
+}
 
 // Initial load
 load();
 
 export const GameStore = {
-  // Game management
-  createGame: (id: string, whitePlayerId?: string, blackPlayerId?: string) => {
-    const game = new SummonChessGame(undefined, undefined, undefined, whitePlayerId, blackPlayerId);
-    games.set(id, game);
+  // User Management
+  getUser(userId: string): User | undefined {
+    return users.get(userId);
+  },
+
+  registerUser(userId: string): User {
+    if (users.has(userId)) {
+      return users.get(userId)!;
+    }
+    const newUser: User = {
+      id: userId,
+      nickname: `Player ${userId.slice(0, 4)}`, // Default nickname
+      elo: 400,
+      gamesPlayed: 0,
+      tier: Tier.Beginner,
+      createdAt: Date.now(),
+    };
+    users.set(userId, newUser);
     persist();
+    return newUser;
+  },
+
+  updateUser(userId: string, data: Partial<User>) {
+    const user = users.get(userId);
+    if (user) {
+      Object.assign(user, data);
+
+      // Update derived fields if ELO changed
+      if (data.elo !== undefined) {
+        user.tier = getTier(user.elo);
+      }
+
+      persist();
+    }
+  },
+
+  // Game management
+  createGame(id: string, whitePlayerId?: string, blackPlayerId?: string) {
+    const game = new SummonChessGame();
+    // Initialize game with player IDs if needed
+    games.set(id, game);
     return game;
   },
-  getGame: (id: string) => {
+
+  getGame(id: string) {
     return games.get(id);
   },
-  saveGame: (id: string, game: SummonChessGame) => {
+
+  saveGame(id: string, game: SummonChessGame) {
     games.set(id, game);
-    persist();
+    // Note: We don't persist full game state to disk on every move for performance
   },
-  deleteGame: (id: string) => {
+
+  deleteGame(id: string) {
     games.delete(id);
-    persist();
   },
 
   // Room management
-  createRoom: (hostId: string, hostNickname: string): RoomInfo => {
-    const roomCode = generateRoomCode();
-    const roomInfo: RoomInfo = {
-      roomCode,
+  createRoom(hostId: string, hostNickname: string): RoomInfo {
+    const code = generateRoomCode();
+
+    // Try to get updated user info
+    const hostUser = users.get(hostId);
+
+    const room: RoomInfo = {
+      roomCode: code,
       hostId,
-      hostNickname,
+      hostNickname: hostUser ? hostUser.nickname : hostNickname,
+      hostElo: hostUser?.elo,
+      spectators: [],
       status: 'waiting',
-      createdAt: Date.now()
+      createdAt: Date.now(),
     };
-    rooms.set(roomCode, roomInfo);
+    rooms.set(code, room);
     persist();
-    return roomInfo;
+    return room;
   },
 
-  getRoom: (roomCode: string): RoomInfo | undefined => {
-    return rooms.get(roomCode.toUpperCase());
+  getRoom(roomCode: string): RoomInfo | undefined {
+    return rooms.get(roomCode);
   },
 
-  joinRoom: (roomCode: string, guestId: string, guestNickname: string): { success: boolean; error?: string; room?: RoomInfo } => {
-    const code = roomCode.toUpperCase();
-    const room = rooms.get(code);
+  addBot(roomCode: string): { success: boolean; error?: string } {
+    const room = rooms.get(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+    if (room.status !== 'waiting') return { success: false, error: 'Game already active' };
+    if (room.guestId) return { success: false, error: 'Room is full' };
 
-    if (!room) {
-      return { success: false, error: '방을 찾을 수 없습니다.' };
+    room.guestId = 'bot';
+    room.guestNickname = 'Bot (Lv.1)';
+    persist();
+
+    return { success: true };
+  },
+
+  joinRoom(roomCode: string, playerId: string, nickname: string, asSpectator = false): { success: boolean; error?: string; room?: RoomInfo } {
+    const room = rooms.get(roomCode);
+    if (!room) return { success: false, error: '방을 찾을 수 없습니다.' };
+
+    const user = users.get(playerId);
+    const safeNickname = user ? user.nickname : nickname;
+    const userElo = user?.elo;
+    const userTier = user?.tier;
+
+    if (asSpectator) {
+      // Check if already in spectators
+      if (!room.spectators.some(s => s.id === playerId)) {
+        room.spectators.push({
+          id: playerId,
+          nickname: safeNickname,
+          elo: userElo,
+          tier: userTier
+        });
+        persist();
+      }
+      return { success: true, room };
     }
 
-    if (room.status !== 'waiting') {
-      return { success: false, error: '이미 게임이 시작되었습니다.' };
+    if (room.hostId === playerId) {
+      // Re-joining as host?
+      return { success: true, room };
     }
 
-    if (room.hostId === guestId) {
-      return { success: false, error: '자신의 방에 참가할 수 없습니다.' };
+    if (room.guestId) {
+      if (room.guestId === playerId) return { success: true, room };
+      return { success: false, error: '방이 꽉 찼습니다.' };
     }
 
-    if (room.guestId && room.guestId !== guestId) {
-      return { success: false, error: '이미 다른 플레이어가 참가했습니다.' };
-    }
-
-    // Join the room
-    room.guestId = guestId;
-    room.guestNickname = guestNickname;
+    room.guestId = playerId;
+    room.guestNickname = safeNickname;
+    room.guestElo = userElo;
     persist();
 
     return { success: true, room };
   },
 
-  startGame: (roomCode: string): { success: boolean; error?: string; gameId?: string } => {
-    const code = roomCode.toUpperCase();
-    const room = rooms.get(code);
+  startGame(roomCode: string): { success: boolean; error?: string; gameId?: string } {
+    const room = rooms.get(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
 
-    if (!room) {
-      return { success: false, error: '방을 찾을 수 없습니다.' };
-    }
+    // Check if we have enough players or a bot
+    if (!room.guestId) return { success: false, error: 'Not enough players' };
 
-    if (!room.guestId) {
-      return { success: false, error: '대기 중인 플레이어가 입장해야 합니다.' };
-    }
+    const gameId = generateRoomCode(); // Unique ID for game
+    const game = this.createGame(gameId, room.hostId, room.guestId);
 
-    if (room.status === 'playing' && room.gameId) {
-      return { success: true, gameId: room.gameId };
-    }
-
-    // Create the game with random color assignment
-    const gameId = crypto.randomUUID();
-    const hostIsWhite = Math.random() < 0.5;
-    const whitePlayer = hostIsWhite ? room.hostId : room.guestId;
-    const blackPlayer = hostIsWhite ? room.guestId : room.hostId;
-    const game = new SummonChessGame(undefined, undefined, undefined, whitePlayer, blackPlayer);
-    games.set(gameId, game);
-
-    room.gameId = gameId;
     room.status = 'playing';
+    room.gameId = gameId;
     persist();
 
     return { success: true, gameId };
   },
 
-  leaveRoom: (roomCode: string, playerId: string): void => {
-    const code = roomCode.toUpperCase();
-    const room = rooms.get(code);
-
+  leaveRoom(roomCode: string, playerId: string): void {
+    const room = rooms.get(roomCode);
     if (!room) return;
 
     if (room.hostId === playerId) {
-      // Host left, delete the room
-      rooms.delete(code);
+      // Host left - destroy room or assign new host?
+      // Simple logic: destroy room
+      rooms.delete(roomCode);
     } else if (room.guestId === playerId) {
-      // Guest left
       room.guestId = undefined;
+      room.guestNickname = undefined;
+      room.guestElo = undefined;
+      if (room.status === 'playing') {
+        // End game if playing?
+        room.status = 'finished';
+      }
+    } else {
+      // Remove spectator
+      room.spectators = room.spectators.filter(s => s.id !== playerId);
     }
     persist();
   },
 
-  deleteRoom: (roomCode: string): void => {
-    rooms.delete(roomCode.toUpperCase());
+  deleteRoom(roomCode: string): void {
+    rooms.delete(roomCode);
     persist();
   },
 
-  // Cleanup old rooms (optional)
-  cleanupOldRooms: () => {
-    const now = Date.now();
-    const maxAge = 60 * 60 * 1000; // 1 hour
+  resetRoom(roomCode: string): { success: boolean; error?: string } {
+    const room = rooms.get(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
 
+    room.status = 'waiting';
+    room.gameId = undefined;
+    persist();
+    return { success: true };
+  },
+
+  getRoomCodeByGameId(gameId: string): string | undefined {
     for (const [code, room] of rooms.entries()) {
-      if (now - room.createdAt > maxAge && room.status === 'waiting') {
+      if (room.gameId === gameId) return code;
+    }
+    return undefined;
+  },
+
+  // Matchmaking
+  addToQueue(playerId: string) {
+    if (!matchQueue.includes(playerId)) {
+      matchQueue.push(playerId);
+    }
+  },
+
+  removeFromQueue(playerId: string) {
+    const idx = matchQueue.indexOf(playerId);
+    if (idx !== -1) {
+      matchQueue.splice(idx, 1);
+    }
+  },
+
+  findMatch(playerId: string): string | null {
+    // Try to find someone else in queue
+    // Simple FIFO: just pick the first person who isn't me
+    for (const opponentId of matchQueue) {
+      if (opponentId !== playerId) {
+        return opponentId;
+      }
+    }
+    return null;
+  },
+
+
+  findActiveRoom(playerId: string): RoomInfo | undefined {
+    for (const room of rooms.values()) {
+      // Check host, guest, or spectator
+      if (room.hostId === playerId) return room;
+      if (room.guestId === playerId) return room;
+      // We generally don't auto-redirect spectators unless intended, but for matchmaking we care about players.
+    }
+    return undefined;
+  },
+
+  cleanupOldRooms() {
+    const now = Date.now();
+    for (const [code, room] of rooms.entries()) {
+      // Delete empty rooms older than 1 hour
+      if (now - room.createdAt > 3600000) {
         rooms.delete(code);
       }
     }

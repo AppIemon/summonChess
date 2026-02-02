@@ -6,6 +6,8 @@ import Board from './Board';
 import Hand from './Hand';
 import { GameState, PieceType, PieceColor, ChatMessage, Action } from '@/lib/game/types';
 import styles from './GameInterface.module.css';
+import { Chess, Square } from 'chess.js';
+import { SimpleEngine } from '../lib/game/ai';
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -143,20 +145,90 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [lastChatCount, setLastChatCount] = useState(0);
 
+  // Tab state
+  const [activeTab, setActiveTab] = useState<'chat' | 'history' | 'hands'>('chat');
+  const historyEndRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     setPlayerId(localStorage.getItem('playerId'));
   }, []);
 
+  // Update effect to scroll history
+  useEffect(() => {
+    if (activeTab === 'history' && gameState?.history) {
+      historyEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [gameState?.history, activeTab]);
+
+  const executeAction = async (action: any) => {
+    const res = await fetch(`/api/game/${gameId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...action, playerId }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      mutate(data.state);
+      setSelectedSquare(null);
+      setSelectedHandPiece(null);
+      setValidTargetSquares([]);
+    } else {
+      if (gameState && gameState.turn === myColor) {
+        try {
+          const errData = await res.json();
+          console.error('Action failed:', errData.error);
+        } catch (e) { }
+      }
+    }
+  };
+
+  // Bot Logic
+  const isBotThinking = useRef(false);
+  useEffect(() => {
+    if (!gameState || gameState.winner || isBotThinking.current) return;
+
+    const isWhite = playerId === gameState.whitePlayerId;
+    const isBotGame = gameState.blackPlayerId === 'BOT'; // Assuming Bot is always Black for now (added by Host)
+
+    // If it's a Bot game, and I am the Host (White), and it's Black's turn (Bot's turn)
+    if (isBotGame && isWhite && gameState.turn === 'b') {
+      isBotThinking.current = true;
+
+      // Small delay for realism
+      setTimeout(async () => {
+        const engine = new SimpleEngine(2); // Depth 2
+        const bestAction = await engine.getBestMove(gameState.fen, gameState.whiteDeck, gameState.blackDeck);
+
+        if (bestAction) {
+          await executeAction({ ...bestAction, playerId: 'BOT', nickname: '🤖 알파고' });
+        }
+        isBotThinking.current = false;
+      }, 1000);
+    }
+  }, [gameState, playerId, executeAction]);
+
+  // Spectator status
+  const isSpectator = useMemo(() => {
+    if (!gameState || !playerId) return false;
+    // Special case: if I am Host playing against Bot, I am NOT spectator.
+    // Logic: Spectator if ID is neither White nor Black.
+    // But if Black is 'BOT', and I am 'White', 
+    // playerId !== 'BOT' is true.
+    // playerId === White is true.
+    // So isSpectator is false. Correct.
+    return playerId !== gameState.whitePlayerId && playerId !== gameState.blackPlayerId;
+  }, [gameState, playerId]);
+
   // Automatic orientation
   useEffect(() => {
-    if (gameState && playerId) {
+    if (gameState && playerId && !isSpectator) {
       if (playerId === gameState.whitePlayerId) {
         setMyColor('w');
       } else if (playerId === gameState.blackPlayerId) {
         setMyColor('b');
       }
     }
-  }, [gameState?.whitePlayerId, gameState?.blackPlayerId, playerId]);
+  }, [gameState?.whitePlayerId, gameState?.blackPlayerId, playerId, isSpectator]);
 
   // Trigger victory animation
   useEffect(() => {
@@ -168,12 +240,12 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
 
   // Handle Premove execution
   useEffect(() => {
-    if (gameState?.turn === myColor && premove && !gameState.winner) {
+    if (!isSpectator && gameState?.turn === myColor && premove && !gameState.winner) {
       const actionToTry = premove;
       setPremove(null);
       executeAction(actionToTry);
     }
-  }, [gameState?.turn, myColor, premove, gameState?.winner]);
+  }, [gameState?.turn, myColor, premove, gameState?.winner, isSpectator]);
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -185,12 +257,12 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
 
   // Reset selection when turn changes (if not premoving)
   useEffect(() => {
-    if (gameState?.turn === myColor) {
+    if (!isSpectator && gameState?.turn === myColor) {
       setValidTargetSquares([]);
       setSelectedSquare(null);
       setSelectedHandPiece(null);
     }
-  }, [gameState?.turn, myColor]);
+  }, [gameState?.turn, myColor, isSpectator]);
 
   // Error handling: Only show full error screen if we don't have existing state and it's a definitive error
   const isFetchingInitial = !gameState && !error;
@@ -221,7 +293,7 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
   if (!gameState) return null; // Should be handled by isFetchingInitial above, but for TS completeness
 
   const handleSquareClick = async (square: string) => {
-    if (gameState.winner) return;
+    if (gameState.winner || isSpectator) return;
 
     if (gameState.turn === myColor) {
       if (selectedHandPiece) {
@@ -288,7 +360,7 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
   };
 
   const handleHandSelect = (piece: PieceType | null) => {
-    if (gameState.winner) return;
+    if (gameState.winner || isSpectator) return;
 
     if (!piece) {
       setSelectedHandPiece(null);
@@ -323,28 +395,6 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
     }
   };
 
-  const executeAction = async (action: any) => {
-    const res = await fetch(`/api/game/${gameId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...action, playerId }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      mutate(data.state);
-      setSelectedSquare(null);
-      setSelectedHandPiece(null);
-      setValidTargetSquares([]);
-    } else {
-      if (gameState.turn === myColor) {
-        try {
-          const errData = await res.json();
-          console.error('Action failed:', errData.error);
-        } catch (e) { }
-      }
-    }
-  };
-
   const handleSendChat = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!chatInput.trim()) return;
@@ -355,8 +405,57 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
   };
 
   const handleResign = async () => {
+    if (isSpectator) return;
     if (!confirm('정말 기권하시겠습니까?')) return;
     await executeAction({ type: 'resign' });
+  };
+
+  const handleReturnToLobby = async () => {
+    // Call API to reset room status
+    try {
+      // Find room code from URL or passing as prop?
+      // Since we don't have roomCode prop easily here (only gameId), maybe we just redirect?
+      // But we want to reset the room status to 'waiting'.
+      // The room status is stored in Store, but we need the roomCode.
+      // Typically roomCode is not directly in GameInterface... 
+      // Wait, RoomPage redirects to GamePage.
+      // GamePage has gameId. Room has gameId.
+
+      // Let's assume we can navigate back to room page if we knew the code.
+      // OPTION 1: Pass roomCode to GameInterface.
+      // OPTION 2: Fetch room info using gameId? No direct map.
+
+      // Since user came from RoomPage, maybe we can just go back in history?
+      // Or we can assume the user knows the room URL.
+      // Actually, for simplicity, let's just go back to the previous page (Rule of thumb).
+      // But we need to reset the room status to 'waiting' for everyone.
+
+      // Let's modify GameInterfaceProps to accept roomCode optionally?
+      // OR better: In RoomPage, when we redirect, we are at /room/[code].
+      // When game starts, we go to /game/[id].
+      // So we lose the room code context unless passed.
+
+      // Let's update `app/game/[id]/page.tsx` and `GameInterface` to propagate roomCode if possible.
+      // But `app/game/[id]/page.tsx` serverside fetch game? Game doesn't store roomCode.
+      // Store has `rooms` map: roomCode -> RoomInfo(gameId).
+      // We can scan rooms to find one with this gameId? Yes, expensive but doable since few rooms.
+      // OR update GameState to include roomCode?
+
+      // Let's update GameState to include roomCode for convenience.
+      if (gameState?.roomCode) {
+        await fetch(`/api/room/${gameState.roomCode}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playerId, action: 'reset' })
+        });
+        window.location.href = `/room/${gameState.roomCode}`;
+      } else {
+        // Fallback
+        window.history.back();
+      }
+    } catch (e) {
+      window.history.back();
+    }
   };
 
   const opponentColor = myColor === 'w' ? 'b' : 'w';
@@ -379,6 +478,7 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
           </div>
         )}
         <div className={styles.status}>
+          {isSpectator && <span className={styles.spectatingBadge}>👀 관전 중</span>}
           <span>차례: {gameState.turn === 'w' ? '⚪ 백' : '⚫ 흑'}</span>
           {gameState.isCheck && <span className={styles.check}>⚠️ 체크!</span>}
           {gameState.isCheckmate && <span className={styles.mate}>👑 체크메이트!</span>}
@@ -394,23 +494,23 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
         {/* Left Sidebar: Hand / Summons */}
         <div className={styles.leftSidebar}>
           <div className={styles.sidebarSection}>
-            <h3>상대 기물</h3>
+            <h3>{isSpectator ? '흑 기물' : '상대 기물'}</h3>
             <Hand
-              pieces={opponentDeck}
-              color={opponentColor}
+              pieces={isSpectator ? gameState.blackDeck : opponentDeck}
+              color={isSpectator ? 'b' : opponentColor}
               onSelect={() => { }}
               selectedPiece={null}
               disabled={true}
             />
           </div>
           <div className={styles.sidebarSection}>
-            <h3>나의 기물</h3>
+            <h3>{isSpectator ? '백 기물' : '나의 기물'}</h3>
             <Hand
-              pieces={myDeck}
-              color={myColor}
+              pieces={isSpectator ? gameState.whiteDeck : myDeck}
+              color={isSpectator ? 'w' : myColor}
               onSelect={handleHandSelect}
               selectedPiece={selectedHandPiece}
-              disabled={gameState.turn !== myColor && !premove}
+              disabled={isSpectator || (gameState.turn !== myColor && !premove)}
             />
           </div>
         </div>
@@ -419,8 +519,8 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
         <div className={styles.centerArea}>
           <div className={styles.timerBar}>
             <TimerDisplay
-              seconds={opponentTime}
-              active={gameState.turn !== myColor && !gameState.winner}
+              seconds={isSpectator ? gameState.blackTime : opponentTime}
+              active={!gameState.winner && (isSpectator ? gameState.turn === 'b' : gameState.turn !== myColor)}
             />
           </div>
 
@@ -437,8 +537,8 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
 
           <div className={styles.timerBar}>
             <TimerDisplay
-              seconds={myTime}
-              active={gameState.turn === myColor && !gameState.winner}
+              seconds={isSpectator ? gameState.whiteTime : myTime}
+              active={!gameState.winner && (isSpectator ? gameState.turn === 'w' : gameState.turn === myColor)}
             />
           </div>
 
@@ -450,37 +550,106 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
           )}
         </div>
 
-        {/* Right Sidebar: Chat */}
+        {/* Right Sidebar: Chat & History */}
         <div className={styles.rightSidebar}>
-          <div className={styles.chatSidebar}>
-            <div className={styles.chatMessages}>
-              {gameState.chat.map((msg) => (
-                <div key={msg.id} className={`${styles.chatMessage} ${msg.senderId === playerId ? styles.msgMe : styles.msgOther}`}>
-                  <span className={styles.senderName}>{msg.nickname}</span>
-                  {msg.text}
+          <div className={styles.tabHeader}>
+            <button
+              className={`${styles.tabButton} ${activeTab === 'chat' ? styles.activeTab : ''}`}
+              onClick={() => setActiveTab('chat')}
+            >
+              💬 채팅
+            </button>
+            <button
+              className={`${styles.tabButton} ${activeTab === 'history' ? styles.activeTab : ''}`}
+              onClick={() => setActiveTab('history')}
+            >
+              📜 기보
+            </button>
+            <button
+              className={`${styles.tabButton} ${styles.mobileOnly} ${activeTab === 'hands' ? styles.activeTab : ''}`}
+              onClick={() => setActiveTab('hands')}
+            >
+              ♟️ 기물
+            </button>
+          </div>
+
+          <div className={styles.tabContent}>
+            {activeTab === 'chat' ? (
+              <div className={styles.chatContainer}>
+                <div className={styles.chatMessages}>
+                  {gameState.chat.map((msg) => (
+                    <div key={msg.id} className={`${styles.chatMessage} ${msg.senderId === playerId ? styles.msgMe : styles.msgOther}`}>
+                      <span className={styles.senderName}>{msg.nickname}</span>
+                      {msg.text}
+                    </div>
+                  ))}
+                  <div ref={chatEndRef} />
                 </div>
-              ))}
-              <div ref={chatEndRef} />
-            </div>
-            <form className={styles.chatInputArea} onSubmit={handleSendChat}>
-              <input
-                type="text"
-                className={styles.chatInput}
-                placeholder="메시지 입력..."
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-              />
-              <button type="submit" className={styles.chatSendBtn}>🏹</button>
-            </form>
+                <form className={styles.chatInputArea} onSubmit={handleSendChat}>
+                  <input
+                    type="text"
+                    className={styles.chatInput}
+                    placeholder="메시지 입력..."
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                  />
+                  <button type="submit" className={styles.chatSendBtn}>🏹</button>
+                </form>
+              </div>
+            ) : activeTab === 'history' ? (
+              <div className={styles.historyContainer}>
+                <div className={styles.historyList}>
+                  {gameState.history && gameState.history.length > 0 ? (
+                    gameState.history.map((move, index) => {
+                      const isWhite = index % 2 === 0;
+                      const moveNum = Math.floor(index / 2) + 1;
+                      return (
+                        <div key={index} className={styles.historyItem}>
+                          {isWhite && <span className={styles.moveNum}>{moveNum}.</span>}
+                          <span className={isWhite ? styles.moveWhite : styles.moveBlack}>{move}</span>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className={styles.emptyHistory}>아직 기록된 수가 없습니다.</div>
+                  )}
+                  <div ref={historyEndRef} />
+                </div>
+              </div>
+            ) : (
+              <div className={styles.handTabContainer}>
+                <div className={styles.sidebarSection}>
+                  <h3>{isSpectator ? '흑 기물' : '상대 기물'}</h3>
+                  <Hand
+                    pieces={isSpectator ? gameState.blackDeck : opponentDeck}
+                    color={isSpectator ? 'b' : opponentColor}
+                    onSelect={() => { }}
+                    selectedPiece={null}
+                    disabled={true}
+                  />
+                </div>
+                <div className={styles.sidebarSection}>
+                  <h3>{isSpectator ? '백 기물' : '나의 기물'}</h3>
+                  <Hand
+                    pieces={isSpectator ? gameState.whiteDeck : myDeck}
+                    color={isSpectator ? 'w' : myColor}
+                    onSelect={handleHandSelect}
+                    selectedPiece={selectedHandPiece}
+                    disabled={isSpectator || (gameState.turn !== myColor && !premove)}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       <div className={styles.controls}>
         <button onClick={() => setMyColor(myColor === 'w' ? 'b' : 'w')}>🔄 보드 뒤집기</button>
-        <button onClick={() => { navigator.clipboard.writeText(window.location.href); alert('링크가 복사되었습니다!'); }}>📋 링크 공유</button>
+        <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/room/${gameId}`); alert('링크가 복사되었습니다!'); }}>📋 링크 공유</button>
         <button onClick={() => alert('🎮 조작 가이드\n\n• 왼쪽: 소환 가능한 기물 목록 (클릭 후 보드에 소환)\n• 중앙: 체스 보드 및 타이머\n• 오른쪽: 실시간 채팅\n• 프리무브: 상대 차례에 예약 가능')}>❓ 가이드</button>
-        <button className={styles.resignButton} onClick={handleResign}>🏳️ 기권</button>
+        {!gameState.winner && !isSpectator && <button className={styles.resignButton} onClick={handleResign}>🏳️ 기권</button>}
+        {(gameState.winner || isSpectator) && <button onClick={handleReturnToLobby}>🚪 {isSpectator ? '나가기' : '대기실로'}</button>}
       </div>
     </div>
   );

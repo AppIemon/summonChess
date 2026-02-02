@@ -4,59 +4,82 @@ import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import styles from './page.module.css';
 
+interface UserInfo {
+  id: string;
+  nickname: string;
+  elo: number;
+  tier: string;
+}
+
 export default function Home() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+
   const [roomCode, setRoomCode] = useState('');
-  const [nickname, setNickname] = useState('');
   const [showJoinInput, setShowJoinInput] = useState(false);
   const [error, setError] = useState('');
 
-  // Load saved nickname
+  // Initialize User
   useEffect(() => {
-    const savedNickname = localStorage.getItem('nickname');
-    if (savedNickname) {
-      setNickname(savedNickname);
-    }
+    const initUser = async () => {
+      let id = localStorage.getItem('playerId');
+      if (!id) {
+        id = crypto.randomUUID();
+        localStorage.setItem('playerId', id);
+      }
+
+      try {
+        const res = await fetch('/api/user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playerId: id }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setUserInfo(data.user);
+        }
+      } catch (e) {
+        console.error('Failed to sync user', e);
+      }
+    };
+    initUser();
   }, []);
 
-  // Get or create player ID
-  const getPlayerId = () => {
-    let id = localStorage.getItem('playerId');
-    if (!id) {
-      id = crypto.randomUUID();
-      localStorage.setItem('playerId', id);
-    }
-    return id;
-  };
+  // Matchmaking Polling
+  useEffect(() => {
+    let pollInterval: NodeJS.Timeout;
 
-  // Save nickname
-  const saveNickname = (name: string) => {
-    localStorage.setItem('nickname', name);
-  };
+    if (isSearching && userInfo) {
+      pollInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/matchmaking?playerId=${userInfo.id}`);
+          const data = await res.json();
 
-  // Create a new room
-  const createRoom = async () => {
-    if (!nickname.trim()) {
-      setError('닉네임을 입력해주세요.');
-      return;
+          if (data.status === 'matched' && data.roomCode) {
+            router.push(`/room/${data.roomCode}`);
+          }
+        } catch (e) {
+          console.error('Poll error', e);
+        }
+      }, 2000);
     }
 
+    return () => clearInterval(pollInterval);
+  }, [isSearching, userInfo, router]);
+
+  const handleCreateRoom = async () => {
+    if (!userInfo) return;
     setLoading(true);
     setError('');
-    saveNickname(nickname.trim());
 
     try {
-      const playerId = getPlayerId();
       const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId, nickname: nickname.trim() }),
+        body: JSON.stringify({ playerId: userInfo.id }), // Nickname handled by server
       });
-
-      if (!res.ok) {
-        throw new Error('Failed to create room');
-      }
 
       const data = await res.json();
       if (data.success && data.roomCode) {
@@ -65,102 +88,119 @@ export default function Home() {
         throw new Error(data.error || 'Unknown error');
       }
     } catch (e) {
-      console.error('Create room error:', e);
       setError('방 생성에 실패했습니다.');
     } finally {
       setLoading(false);
     }
   };
 
-  // Join existing room
-  const joinRoom = () => {
-    if (!nickname.trim()) {
-      setError('닉네임을 입력해주세요.');
-      return;
-    }
+  const handleJoinRoom = () => {
     if (!roomCode.trim()) {
       setError('방 코드를 입력해주세요.');
       return;
     }
-
-    saveNickname(nickname.trim());
-    setError('');
     router.push(`/room/${roomCode.trim().toUpperCase()}`);
+  };
+
+  const toggleMatchmaking = async () => {
+    if (!userInfo) return;
+
+    if (isSearching) {
+      // Cancel
+      setIsSearching(false);
+      // Ideally call API to cancel
+    } else {
+      // Start
+      setIsSearching(true);
+      try {
+        await fetch('/api/matchmaking', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playerId: userInfo.id }),
+        });
+      } catch (e) {
+        setError('매칭 시작 실패');
+        setIsSearching(false);
+      }
+    }
   };
 
   return (
     <div className={styles.container}>
       <div className={styles.content}>
-        {/* Logo & Title */}
+        {/* Header */}
         <div className={styles.header}>
           <div className={styles.logo}>♔♚</div>
           <h1 className={styles.title}>소환 체스</h1>
           <p className={styles.subtitle}>
-            기존 체스에 소환 시스템을 더했습니다.<br />
-            킹 하나로 시작하여 당신의 군대를 전장에 소환하세요.
+            ELO 시스템 & 랭크 매치 도입!
           </p>
         </div>
 
-        {/* Nickname Input */}
-        <div className={styles.nicknameSection}>
-          <label className={styles.nicknameLabel}>닉네임</label>
-          <input
-            type="text"
-            className={styles.nicknameInput}
-            placeholder="닉네임 입력"
-            value={nickname}
-            onChange={(e) => setNickname(e.target.value)}
-            maxLength={12}
-          />
-        </div>
+        {/* User Stats */}
+        {userInfo && (
+          <div className={styles.userStats}>
+            <div className={styles.tierBadge}>{userInfo.tier}</div>
+            <div className={styles.userName}>{userInfo.nickname}</div>
+            <div className={styles.userElo}>Rating: {userInfo.elo}</div>
+          </div>
+        )}
 
         {/* Action Buttons */}
         <div className={styles.actions}>
+          {/* Matchmaking Button */}
+          <button
+            className={`${styles.primaryButton} ${isSearching ? styles.searching : ''}`}
+            onClick={toggleMatchmaking}
+            disabled={!userInfo || loading}
+          >
+            {isSearching ? (
+              <>
+                <span className={styles.spinner}></span>
+                매칭 중... (취소)
+              </>
+            ) : (
+              <>
+                <span className={styles.buttonIcon}>⚔️</span>
+                랜덤 매칭
+              </>
+            )}
+          </button>
+
           {!showJoinInput ? (
-            <>
+            <div className={styles.subActions}>
               <button
-                className={styles.primaryButton}
-                onClick={createRoom}
-                disabled={loading}
+                className={styles.secondaryButton}
+                onClick={handleCreateRoom}
+                disabled={loading || isSearching}
               >
-                {loading ? (
-                  <span className={styles.buttonLoading}>
-                    <span className={styles.spinner}></span>
-                    방 생성 중...
-                  </span>
-                ) : (
-                  <>
-                    <span className={styles.buttonIcon}>➕</span>
-                    방 만들기
-                  </>
-                )}
+                방 만들기
               </button>
 
               <button
                 className={styles.secondaryButton}
                 onClick={() => setShowJoinInput(true)}
-                disabled={loading}
+                disabled={loading || isSearching}
               >
-                <span className={styles.buttonIcon}>🚪</span>
                 방 참가하기
               </button>
-            </>
+            </div>
           ) : (
             <div className={styles.joinSection}>
               <input
                 type="text"
                 className={styles.roomInput}
-                placeholder="방 코드 입력 (예: ABC123)"
+                placeholder="코드 입력"
                 value={roomCode}
                 onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
                 maxLength={6}
                 autoFocus
-                onKeyDown={(e) => e.key === 'Enter' && joinRoom()}
+                onKeyDown={(e) => e.key === 'Enter' && handleJoinRoom()}
               />
               <div className={styles.joinButtons}>
                 <button
                   className={styles.primaryButton}
-                  onClick={joinRoom}
+                  onClick={handleJoinRoom}
                 >
                   참가
                 </button>
@@ -179,35 +219,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* Error Message */}
         {error && <p className={styles.error}>{error}</p>}
-
-        {/* Rules */}
-        <div className={styles.rules}>
-          <h3>게임 규칙</h3>
-          <ul>
-            <li>
-              <span className={styles.ruleIcon}>👑</span>
-              게임 초기 세팅은 킹만 남기고 모두 버립니다. 빠진 모든 기물들은 소환 가능합니다.
-            </li>
-            <li>
-              <span className={styles.ruleIcon}>♟️</span>
-              자신의 차례에 기물을 소환하거나 이동할 수 있습니다.
-            </li>
-            <li>
-              <span className={styles.ruleIcon}>✨</span>
-              자신의 기물이 닿는 칸에만 소환 가능합니다. 폰은 1·8랭크 불가.
-            </li>
-            <li>
-              <span className={styles.ruleIcon}>💀</span>
-              잡힌 기물은 다시 소환할 수 없습니다.
-            </li>
-            <li>
-              <span className={styles.ruleIcon}>🏆</span>
-              체크메이트로 승리하세요!
-            </li>
-          </ul>
-        </div>
       </div>
     </div>
   );
