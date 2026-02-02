@@ -1,11 +1,5 @@
 import { MongoClient, Db } from 'mongodb';
 
-const MONGODB_URI = process.env.MONGODB_URI || '';
-
-if (!MONGODB_URI) {
-  console.warn('Warning: MONGODB_URI not defined, falling back to in-memory store');
-}
-
 interface MongoConnection {
   client: MongoClient;
   db: Db;
@@ -17,8 +11,8 @@ const globalForMongo = globalThis as unknown as {
   mongoPromise: Promise<MongoConnection> | null;
 };
 
-globalForMongo.mongoConnection = globalForMongo.mongoConnection || null;
-globalForMongo.mongoPromise = globalForMongo.mongoPromise || null;
+if (!globalForMongo.mongoConnection) globalForMongo.mongoConnection = null;
+if (!globalForMongo.mongoPromise) globalForMongo.mongoPromise = null;
 
 export async function connectToDatabase(): Promise<MongoConnection> {
   // Return cached connection if available
@@ -33,7 +27,13 @@ export async function connectToDatabase(): Promise<MongoConnection> {
 
   // Create new connection
   globalForMongo.mongoPromise = (async () => {
-    const client = new MongoClient(MONGODB_URI, {
+    const uri = (process.env.MONGODB_URI || '').trim();
+
+    if (!uri) {
+      throw new Error('MONGODB_URI is not defined in environment variables');
+    }
+
+    const client = new MongoClient(uri, {
       maxPoolSize: 10,
       minPoolSize: 1,
     });

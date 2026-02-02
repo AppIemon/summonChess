@@ -3,7 +3,9 @@ import { GameStore } from '@/lib/store';
 
 export async function POST(request: Request) {
   try {
-    const { playerId } = await request.json();
+    const body = await request.json();
+    const { playerId } = body;
+
     if (!playerId) {
       return NextResponse.json({ success: false, error: 'Missing playerId' }, { status: 400 });
     }
@@ -12,9 +14,12 @@ export async function POST(request: Request) {
     const user = await GameStore.registerUser(playerId);
 
     return NextResponse.json({ success: true, user });
-  } catch (e) {
+  } catch (e: any) {
     console.error('Error in /api/user POST:', e);
-    return NextResponse.json({ success: false, error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({
+      success: false,
+      error: e.message || 'Internal Server Error'
+    }, { status: 500 });
   }
 }
 
@@ -33,8 +38,11 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({ success: true, user });
-  } catch (e) {
+  } catch (e: any) {
     console.error('Error in /api/user GET:', e);
-    return NextResponse.json({ success: false, error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({
+      success: false,
+      error: e.message || 'Internal Server Error'
+    }, { status: 500 });
   }
 }
