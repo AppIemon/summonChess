@@ -5,7 +5,7 @@ const EMPTY = 0;
 const PAWN = 1, KNIGHT = 2, BISHOP = 3, ROOK = 4, QUEEN = 5, KING = 6;
 const WHITE = 1, BLACK = -1;
 const INF = 100000000;
-const PIECE_VALS = [0, 50, 400, 400, 500, 1100, 20000];
+const PIECE_VALS = [0, 100, 350, 450, 500, 1100, 20000];
 
 interface Move {
   type: 'MOVE' | 'SUMMON';
@@ -306,24 +306,23 @@ class AiGameState {
       score += side * v;
     }
 
-    // 2. Reserve Material
+    // 2. Reserve Material - Slightly higher weight (1.1x) to encourage conservation
     for (let p = 1; p <= 5; p++) {
-      score += this.reserve[1][p] * PIECE_VALS[p];
-      score -= this.reserve[0][p] * PIECE_VALS[p];
+      score += this.reserve[1][p] * PIECE_VALS[p] * 1.1;
+      score -= this.reserve[0][p] * PIECE_VALS[p] * 1.1;
     }
 
     // 3. Mobility & Control
-    const whiteMoves = this.turn === WHITE ? this.generateMoves().length : 0;
-    // (In a real engine we'd calculate mobility for both, but for speed we estimate)
-    score += whiteMoves * 5;
+    const mobility = this.generateMoves().length;
+    score += (this.turn === WHITE ? 1 : -1) * mobility * 5;
 
     // 4. Check & King Safety
     // Check is VERY good for the side that made it
     const whiteInCheck = this.isInCheck(WHITE);
     const blackInCheck = this.isInCheck(BLACK);
 
-    if (whiteInCheck) score -= 1000;
-    if (blackInCheck) score += 1000;
+    if (whiteInCheck) score -= 120;
+    if (blackInCheck) score += 120;
 
     // Extra bonus for "Check if I can"
     // This is already reflected slightly in material but Let's add more
@@ -406,6 +405,12 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number):
   for (const m of moves) {
     const prevState = gs.captureState();
     gs.makeMove(m);
+
+    if (gs.isInCheck(gs.turn * -1)) {
+      gs.undoMove(m, prevState);
+      continue;
+    }
+
     const val = -alphaBeta(gs, depth - 1, -beta, -alpha);
     gs.undoMove(m, prevState);
 
@@ -436,7 +441,7 @@ self.onmessage = (e) => {
   const gs = new AiGameState();
   gs.loadFen(fen);
 
-  const depth = 3; // Reduced depth for responsiveness
+  const depth = 4; // Increased from 3 to 4 as requested
   let alpha = -INF;
   let beta = INF;
 
@@ -456,6 +461,12 @@ self.onmessage = (e) => {
   for (const m of moves) {
     const prevState = gs.captureState();
     gs.makeMove(m);
+
+    if (gs.isInCheck(gs.turn * -1)) {
+      gs.undoMove(m, prevState);
+      continue;
+    }
+
     const val = -alphaBeta(gs, depth - 1, -beta, -alpha);
     gs.undoMove(m, prevState);
 
@@ -466,7 +477,18 @@ self.onmessage = (e) => {
     alpha = Math.max(alpha, val);
   }
 
-  console.log(`AI search finished. Best move: ${bestM.type} ${bestM.from}->${bestM.to}. Score: ${maxVal}. Time: ${Date.now() - startTime}ms`);
+  if (maxVal === -INF) {
+    // No legal moves - checkmate or stalemate
+    if (gs.isInCheck(gs.turn)) {
+      self.postMessage({ type: 'RESIGN' });
+    } else {
+      self.postMessage({ type: 'MOVE', move: null });
+    }
+    return;
+  }
+
+  const bestMoveStr = bestM.type === 'SUMMON' ? `SUMMON ${bestM.piece} to ${bestM.to}` : `MOVE ${bestM.from}->${bestM.to}`;
+  console.log(`AI search finished. Best move: ${bestMoveStr}. Score: ${maxVal}. Time: ${Date.now() - startTime}ms`);
 
   // Resignation check
   if (maxVal < -MATE_SCORE + 100) {

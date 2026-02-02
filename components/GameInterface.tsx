@@ -293,14 +293,13 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
     }
   }, [gameState?.chat, lastChatCount]);
 
-  // Reset selection when turn changes (if not premoving)
+  // Reset selection when turn changes
   useEffect(() => {
-    if (!isAnalysis && !isSpectator && gameState?.turn === myColor) {
+    if (isAnalysis || (!isSpectator && gameState?.turn === myColor)) {
       setValidTargetSquares([]);
       setSelectedSquare(null);
       setSelectedHandPiece(null);
     }
-
   }, [gameState?.turn, myColor, isSpectator, isAnalysis]);
 
   // Error handling: Only show full error screen if we don't have existing state and it's a definitive error
@@ -421,6 +420,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
           for (let c = 0; c < 8; c++) {
             const sq = `${'abcdefgh'[c]}${r}`;
             if (!chess.get(sq as any)) {
+              // In analysis, use current turn; in game, use myColor
               const col = isAnalysis ? gameState.turn : myColor;
               if (!isReachableByOwnPiece(chess, sq as any, col)) continue;
               if (piece === 'p' && (r === 1 || r === 8)) continue;
@@ -553,23 +553,23 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         {/* Left Sidebar: Hand / Summons */}
         <div className={styles.leftSidebar}>
           <div className={styles.sidebarSection}>
-            <h3>{isSpectator ? '흑 기물' : '상대 기물'}</h3>
+            <h3>{isAnalysis || isSpectator ? (opponentColor === 'w' ? '백 기물' : '흑 기물') : '상대 기물'}</h3>
             <Hand
-              pieces={isSpectator ? gameState.blackDeck : opponentDeck}
-              color={isSpectator ? 'b' : opponentColor}
-              onSelect={() => { }}
-              selectedPiece={null}
-              disabled={true}
+              pieces={opponentDeck}
+              color={opponentColor}
+              onSelect={handleHandSelect}
+              selectedPiece={gameState.turn === opponentColor ? selectedHandPiece : null}
+              disabled={isSpectator || (!isAnalysis) || (isAnalysis && gameState.turn !== opponentColor)}
             />
           </div>
           <div className={styles.sidebarSection}>
-            <h3>{isSpectator ? '백 기물' : '나의 기물'}</h3>
+            <h3>{isAnalysis || isSpectator ? (myColor === 'w' ? '백 기물' : '흑 기물') : '나의 기물'}</h3>
             <Hand
-              pieces={isSpectator ? gameState.whiteDeck : myDeck}
-              color={isSpectator ? 'w' : myColor}
+              pieces={myDeck}
+              color={myColor}
               onSelect={handleHandSelect}
-              selectedPiece={selectedHandPiece}
-              disabled={isSpectator || (gameState.turn !== myColor && !premove)}
+              selectedPiece={gameState.turn === myColor ? selectedHandPiece : null}
+              disabled={isSpectator || (isAnalysis && gameState.turn !== myColor)}
             />
           </div>
         </div>
@@ -678,23 +678,23 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
             ) : (
               <div className={styles.handTabContainer}>
                 <div className={styles.sidebarSection}>
-                  <h3>{isSpectator ? '흑 기물' : '상대 기물'}</h3>
+                  <h3>{isAnalysis || isSpectator ? (opponentColor === 'w' ? '백 기물' : '흑 기물') : '상대 기물'}</h3>
                   <Hand
-                    pieces={isSpectator ? gameState.blackDeck : opponentDeck}
-                    color={isSpectator ? 'b' : opponentColor}
-                    onSelect={() => { }}
-                    selectedPiece={null}
-                    disabled={true}
+                    pieces={opponentDeck}
+                    color={opponentColor}
+                    onSelect={handleHandSelect}
+                    selectedPiece={gameState.turn === opponentColor ? selectedHandPiece : null}
+                    disabled={isSpectator || (!isAnalysis) || (isAnalysis && gameState.turn !== opponentColor)}
                   />
                 </div>
                 <div className={styles.sidebarSection}>
-                  <h3>{isSpectator ? '백 기물' : '나의 기물'}</h3>
+                  <h3>{isAnalysis || isSpectator ? (myColor === 'w' ? '백 기물' : '흑 기물') : '나의 기물'}</h3>
                   <Hand
-                    pieces={isSpectator ? gameState.whiteDeck : myDeck}
-                    color={isSpectator ? 'w' : myColor}
+                    pieces={myDeck}
+                    color={myColor}
                     onSelect={handleHandSelect}
-                    selectedPiece={selectedHandPiece}
-                    disabled={isSpectator || (gameState.turn !== myColor && !premove)}
+                    selectedPiece={gameState.turn === myColor ? selectedHandPiece : null}
+                    disabled={isSpectator || (isAnalysis && gameState.turn !== myColor)}
                   />
                 </div>
               </div>
