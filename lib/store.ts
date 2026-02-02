@@ -30,6 +30,7 @@ export interface RoomInfo {
   gameId?: string;
   status: 'waiting' | 'playing' | 'finished';
   createdAt: number;
+  updatedAt: number;
 }
 
 interface SerializedGame {
@@ -180,7 +181,10 @@ export const GameStore = {
       spectators: [],
       status: 'waiting',
       createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
+
+    await this.cleanupOldRooms().catch(e => console.error('Cleanup error:', e));
 
     await db.collection(COLLECTIONS.ROOMS).insertOne(room);
     memoryCache.rooms.set(code, { room, cachedAt: Date.now() });
@@ -270,7 +274,8 @@ export const GameStore = {
         $set: {
           guestId: playerId,
           guestNickname: safeNickname,
-          guestElo: userElo
+          guestElo: userElo,
+          updatedAt: Date.now()
         }
       }
     );
@@ -298,11 +303,24 @@ export const GameStore = {
 
     await db.collection(COLLECTIONS.ROOMS).updateOne(
       { roomCode },
-      { $set: { status: 'playing', gameId } }
+      { $set: { status: 'playing', gameId, updatedAt: Date.now() } }
     );
 
     memoryCache.rooms.delete(roomCode);
     return { success: true, gameId };
+  },
+
+  async finishRoom(gameId: string): Promise<void> {
+    const db = await getDb();
+    await db.collection(COLLECTIONS.ROOMS).updateOne(
+      { gameId },
+      { $set: { status: 'finished', updatedAt: Date.now() } }
+    );
+    // Find room code to clear cache
+    const room = await db.collection<RoomInfo>(COLLECTIONS.ROOMS).findOne({ gameId });
+    if (room) {
+      memoryCache.rooms.delete(room.roomCode);
+    }
   },
 
   async leaveRoom(roomCode: string, playerId: string): Promise<void> {
@@ -318,14 +336,19 @@ export const GameStore = {
         $unset: { guestId: '', guestNickname: '', guestElo: '' }
       };
       if (room.status === 'playing') {
-        update.$set = { status: 'finished' };
+        update.$set = { status: 'finished', updatedAt: Date.now() };
+      } else {
+        update.$set = { updatedAt: Date.now() };
       }
       await db.collection(COLLECTIONS.ROOMS).updateOne({ roomCode }, update);
       memoryCache.rooms.delete(roomCode);
     } else {
       await db.collection(COLLECTIONS.ROOMS).updateOne(
         { roomCode },
-        { $pull: { spectators: { id: playerId } } } as any
+        {
+          $pull: { spectators: { id: playerId } } as any,
+          $set: { updatedAt: Date.now() }
+        }
       );
       memoryCache.rooms.delete(roomCode);
     }
@@ -344,7 +367,7 @@ export const GameStore = {
 
     await db.collection(COLLECTIONS.ROOMS).updateOne(
       { roomCode },
-      { $set: { status: 'waiting' }, $unset: { gameId: '' } }
+      { $set: { status: 'waiting', updatedAt: Date.now() }, $unset: { gameId: '' } }
     );
 
     memoryCache.rooms.delete(roomCode);
@@ -402,7 +425,7 @@ export const GameStore = {
     // Delete empty waiting/finished rooms older than 1 hour
     await db.collection(COLLECTIONS.ROOMS).deleteMany({
       status: { $ne: 'playing' },
-      createdAt: { $lt: now - 3600000 }
+      updatedAt: { $lt: now - 3600000 }
     });
 
     // Delete stale playing rooms older than 24 hours

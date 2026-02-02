@@ -61,6 +61,8 @@ export async function POST(
             await GameStore.updateUser(blackId, { elo: newBlackElo, gamesPlayed: blackUser.gamesPlayed + 1 });
           }
         }
+
+        await GameStore.finishRoom(id);
       }
 
       return NextResponse.json({ success: true, state });

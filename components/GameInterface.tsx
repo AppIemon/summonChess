@@ -453,37 +453,12 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   };
 
   const handleReturnToLobby = async () => {
-    // Call API to reset room status
+    if (isAnalysis || isAi) {
+      window.location.href = '/';
+      return;
+    }
+
     try {
-      // Find room code from URL or passing as prop?
-      // Since we don't have roomCode prop easily here (only gameId), maybe we just redirect?
-      // But we want to reset the room status to 'waiting'.
-      // The room status is stored in Store, but we need the roomCode.
-      // Typically roomCode is not directly in GameInterface... 
-      // Wait, RoomPage redirects to GamePage.
-      // GamePage has gameId. Room has gameId.
-
-      // Let's assume we can navigate back to room page if we knew the code.
-      // OPTION 1: Pass roomCode to GameInterface.
-      // OPTION 2: Fetch room info using gameId? No direct map.
-
-      // Since user came from RoomPage, maybe we can just go back in history?
-      // Or we can assume the user knows the room URL.
-      // Actually, for simplicity, let's just go back to the previous page (Rule of thumb).
-      // But we need to reset the room status to 'waiting' for everyone.
-
-      // Let's modify GameInterfaceProps to accept roomCode optionally?
-      // OR better: In RoomPage, when we redirect, we are at /room/[code].
-      // When game starts, we go to /game/[id].
-      // So we lose the room code context unless passed.
-
-      // Let's update `app/game/[id]/page.tsx` and `GameInterface` to propagate roomCode if possible.
-      // But `app/game/[id]/page.tsx` serverside fetch game? Game doesn't store roomCode.
-      // Store has `rooms` map: roomCode -> RoomInfo(gameId).
-      // We can scan rooms to find one with this gameId? Yes, expensive but doable since few rooms.
-      // OR update GameState to include roomCode?
-
-      // Let's update GameState to include roomCode for convenience.
       if (gameState?.roomCode) {
         await fetch(`/api/room/${gameState.roomCode}`, {
           method: 'POST',
@@ -492,12 +467,31 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         });
         window.location.href = `/room/${gameState.roomCode}`;
       } else {
-        // Fallback
-        window.history.back();
+        window.location.href = '/';
       }
     } catch (e) {
-      window.history.back();
+      window.location.href = '/';
     }
+  };
+
+  const handleQuit = async () => {
+    if (isAnalysis || isAi) {
+      window.location.href = '/';
+      return;
+    }
+
+    if (gameState?.roomCode) {
+      try {
+        await fetch(`/api/room/${gameState.roomCode}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playerId, action: 'leave' }),
+        });
+      } catch (e) {
+        console.error('Failed to leave room:', e);
+      }
+    }
+    window.location.href = '/';
   };
 
   const opponentColor = myColor === 'w' ? 'b' : 'w';
@@ -718,7 +712,11 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         {!isAnalysis && <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/room/${gameId}`); alert('링크가 복사되었습니다!'); }}>📋 링크 공유</button>}
         <button onClick={() => alert('🎮 조작 가이드\n\n• 왼쪽: 소환 가능한 기물 목록 (클릭 후 보드에 소환)\n• 중앙: 체스 보드 및 타이머\n• 오른쪽: 실시간 채팅\n• 프리무브: 상대 차례에 예약 가능')}>❓ 가이드</button>
         {!isAnalysis && !gameState.winner && !isSpectator && <button className={styles.resignButton} onClick={handleResign}>🏳️ 기권</button>}
-        {(isAnalysis || gameState.winner || isSpectator) && <button onClick={() => window.location.href = '/'}>🚪 {isAnalysis ? '그만하기' : (isSpectator ? '나가기' : '대기실로')}</button>}
+        {(isAnalysis || gameState.winner || isSpectator) && (
+          <button onClick={isSpectator ? handleQuit : handleReturnToLobby}>
+            🚪 {isAnalysis ? '그만하기' : (isSpectator ? '나가기' : '대기실로')}
+          </button>
+        )}
       </div>
 
       {isAnalysis && (
