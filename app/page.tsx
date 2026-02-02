@@ -20,6 +20,7 @@ export default function Home() {
   const [roomCode, setRoomCode] = useState('');
   const [showJoinInput, setShowJoinInput] = useState(false);
   const [error, setError] = useState('');
+  const [initFailed, setInitFailed] = useState(false);
 
   // Initialize User
   useEffect(() => {
@@ -31,6 +32,7 @@ export default function Home() {
       }
 
       try {
+        setLoading(true);
         const res = await fetch('/api/user', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -39,9 +41,17 @@ export default function Home() {
         const data = await res.json();
         if (data.success) {
           setUserInfo(data.user);
+          setInitFailed(false);
+        } else {
+          setInitFailed(true);
+          setError('사용자 정보를 불러오는 데 실패했습니다.');
         }
       } catch (e) {
         console.error('Failed to sync user', e);
+        setInitFailed(true);
+        setError('서버 연결에 실패했습니다.');
+      } finally {
+        setLoading(false);
       }
     };
     initUser();
@@ -70,7 +80,12 @@ export default function Home() {
   }, [isSearching, userInfo, router]);
 
   const handleCreateRoom = async () => {
-    if (!userInfo) return;
+    if (!userInfo) {
+      if (initFailed) {
+        setError('사용자 초기화에 실패했습니다. 페이지를 새로고침 해주세요.');
+      }
+      return;
+    }
     setLoading(true);
     setError('');
 
