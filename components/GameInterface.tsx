@@ -70,7 +70,7 @@ function Confetti({ count = 50 }: { count?: number }) {
       pieces.push({
         id: i,
         left: `${Math.random() * 100}%`,
-        delay: `${Math.random() * 2}s`,
+        delay: `${2 + Math.random() * 2}s`,
         duration: `${2 + Math.random() * 2}s`,
         color: colors[Math.floor(Math.random() * colors.length)],
         size: `${6 + Math.random() * 8}px`,
@@ -300,9 +300,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       setSelectedSquare(null);
       setSelectedHandPiece(null);
     }
-    if (isAnalysis && gameState) {
-      setMyColor(gameState.turn);
-    }
+
   }, [gameState?.turn, myColor, isSpectator, isAnalysis]);
 
   // Error handling: Only show full error screen if we don't have existing state and it's a definitive error

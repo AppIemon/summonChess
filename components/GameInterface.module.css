@@ -415,6 +415,19 @@
   justify-content: center;
   z-index: 2000;
   pointer-events: none;
+  animation: darkenBackground 2s ease-in-out 2s forwards;
+}
+
+@keyframes darkenBackground {
+  from {
+    background: rgba(0, 0, 0, 0);
+    backdrop-filter: blur(0px);
+  }
+
+  to {
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(8px);
+  }
 }
 
 .flashEffect {
@@ -424,7 +437,8 @@
   width: 100%;
   height: 100%;
   background: white;
-  animation: madMovieFlash 1s ease-out;
+  opacity: 0;
+  animation: madMovieFlash 1s ease-out 2s;
 }
 
 @keyframes madMovieFlash {
@@ -442,7 +456,60 @@
 }
 
 .victoryContent {
-  animation: scaleIn 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  opacity: 0;
+  transform: scale(0.5);
+  animation: scaleIn 1s cubic-bezier(0.175, 0.885, 0.32, 1.275) 2.5s forwards;
+}
+
+.crown {
+  font-size: 5rem;
+  filter: drop-shadow(0 0 20px rgba(255, 215, 0, 0.6));
+  animation: float 3s ease-in-out infinite;
+}
+
+.victoryText {
+  font-size: 5rem;
+  font-weight: 900;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  text-shadow: 0 0 30px rgba(255, 255, 255, 0.5), 0 10px 20px rgba(0, 0, 0, 0.5);
+  margin: 10px 0;
+}
+
+.winnerText {
+  font-size: 2.5rem;
+  font-weight: 800;
+  padding: 10px 40px;
+  border-radius: 50px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.winnerWhite {
+  background: #fff;
+  color: #1a1a2e;
+}
+
+.winnerBlack {
+  background: #333;
+  color: #fff;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+@keyframes float {
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-20px);
+  }
 }
 
 @keyframes scaleIn {
@@ -599,4 +666,88 @@
 
 .analysisTools button:hover {
   background: #2c3e50;
+}
+
+.confettiContainer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2005;
+}
+
+.confetti {
+  position: absolute;
+  top: -20px;
+  animation: confettiFall linear forwards;
+}
+
+@keyframes confettiFall {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateY(100vh) rotate(720deg);
+    opacity: 0;
+  }
+}
+
+.burstContainer {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 0;
+  height: 0;
+  z-index: -1;
+}
+
+.burst {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  opacity: 0;
+  animation: burstMove 1.5s ease-out 2s forwards;
+}
+
+.burst1 {
+  width: 100px;
+  height: 100px;
+  background: radial-gradient(circle, rgba(255, 215, 0, 0.4) 0%, transparent 70%);
+}
+
+.burst2 {
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(circle, rgba(102, 126, 234, 0.3) 0%, transparent 70%);
+  animation-delay: 2.2s;
+}
+
+.burst3 {
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(167, 139, 250, 0.2) 0%, transparent 70%);
+  animation-delay: 2.4s;
+}
+
+@keyframes burstMove {
+  0% {
+    transform: translate(-50%, -50%) scale(0.1);
+    opacity: 0;
+  }
+
+  50% {
+    opacity: 0.8;
+  }
+
+  100% {
+    transform: translate(-50%, -50%) scale(5);
+    opacity: 0;
+  }
 }
