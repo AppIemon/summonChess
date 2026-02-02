@@ -91,8 +91,8 @@ export class SummonChessGame {
 
   private calculateWinner(isTimeout: boolean, whiteTime: number, blackTime: number): PieceColor | null {
     if (this.resignedBy) return this.resignedBy === 'w' ? 'b' : 'w';
-    if (isTimeout) return whiteTime <= 0 ? 'b' : 'w';
     if (this.isTrueCheckmate()) return this.chess.turn() === 'w' ? 'b' : 'w';
+    if (isTimeout) return whiteTime <= 0 ? 'b' : 'w';
     return null;
   }
 

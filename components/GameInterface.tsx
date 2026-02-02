@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import useSWR from 'swr';
 import Board from './Board';
 import Hand from './Hand';
@@ -115,7 +115,7 @@ function CheckmateOverlay({
   onAutoClose: () => void
 }) {
   const isWhiteWinner = winner === 'w';
-  const [countdown, setCountdown] = useState(5);
+  const [countdown, setCountdown] = useState(3);
 
   useEffect(() => {
     if (countdown <= 0) {
@@ -186,7 +186,11 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       const game = new SummonChessGame();
       setLocalGame(game);
       setLocalGameState(game.getState());
-      setMyColor('w');
+      if (isAi) {
+        setMyColor(Math.random() < 0.5 ? 'w' : 'b');
+      } else {
+        setMyColor('w');
+      }
     }
   }, [isAnalysis, isAi]);
 
@@ -197,6 +201,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   const [validTargetSquares, setValidTargetSquares] = useState<string[]>([]);
   const [myColor, setMyColor] = useState<PieceColor>('w');
   const [showVictory, setShowVictory] = useState(false);
+  const [victoryShown, setVictoryShown] = useState(false);
 
   // Premoves state
   const [premove, setPremove] = useState<Action | null>(null);
@@ -289,10 +294,10 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
 
   // Trigger victory animation
   useEffect(() => {
-    const isGameOver = gameState?.isCheckmate || gameState?.isTimeout || gameState?.isStalemate || gameState?.isDraw || (gameState?.winner);
+    const isGameOver = !!(gameState?.isCheckmate || gameState?.isTimeout || gameState?.isStalemate || gameState?.isDraw || gameState?.winner);
 
     if (isGameOver) {
-      if (!finalResult) {
+      if (!victoryShown) {
         setFinalResult({
           winner: gameState.winner,
           isTimeout: gameState.isTimeout,
@@ -301,19 +306,20 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
           isDraw: gameState.isDraw
         });
         setShowVictory(true);
+        setVictoryShown(true);
       }
     } else {
-      // Game is not over (maybe reset)
-      if (finalResult) {
-        setFinalResult(null);
+      // Reset shown state when game is not over (e.g. after a reset)
+      if (victoryShown) {
+        setVictoryShown(false);
         setShowVictory(false);
       }
     }
-  }, [gameState, finalResult]);
+  }, [gameState, victoryShown]);
 
   // Handle AI turn
   useEffect(() => {
-    if (isAi && aiLoaded && localGame && localGameState && localGameState.turn === 'b' && !localGameState.winner) {
+    if (isAi && aiLoaded && localGame && localGameState && localGameState.turn !== myColor && !localGameState.winner) {
       const handleAiMove = async () => {
         const result: { type: 'MOVE' | 'RESIGN'; move?: any } = await getBestMove(localGameState.fen);
 
@@ -339,7 +345,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       const timer = setTimeout(handleAiMove, 200);
       return () => clearTimeout(timer);
     }
-  }, [isAi, aiLoaded, localGameState?.turn]);
+  }, [isAi, aiLoaded, localGameState?.turn, myColor]);
 
   // Handle Premove execution
   useEffect(() => {
@@ -573,10 +579,6 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
     await executeAction({ type: 'undo_response', accept });
   };
 
-  const handleCloseVictory = useCallback(() => {
-    setShowVictory(false);
-  }, []);
-
   return (
     <div className={styles.container}>
       {showVictory && finalResult && (
@@ -585,7 +587,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
           isTimeout={finalResult.isTimeout}
           isStalemate={finalResult.isStalemate}
           isCheckmate={finalResult.isCheckmate}
-          onAutoClose={handleCloseVictory}
+          onAutoClose={() => setShowVictory(false)}
         />
       )}
 

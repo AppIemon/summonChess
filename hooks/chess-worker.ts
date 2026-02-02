@@ -505,9 +505,8 @@ self.onmessage = (e) => {
   // Pre-sort moves
   moves.sort((a, b) => scoreMove(gs, b) - scoreMove(gs, a));
 
+  let bestM = moves[0];
   let maxVal = -INF;
-  const moveResults: { move: Move; score: number }[] = [];
-  const RANDOMNESS_THRESHOLD = 8; // Small score variation (approx 0.08 of a pawn) to add variety
 
   for (const m of moves) {
     const prevState = gs.captureState();
@@ -521,9 +520,9 @@ self.onmessage = (e) => {
     const val = -alphaBeta(gs, depth - 1, -beta, -alpha);
     gs.undoMove(m, prevState);
 
-    moveResults.push({ move: m, score: val });
     if (val > maxVal) {
       maxVal = val;
+      bestM = m;
     }
     alpha = Math.max(alpha, val);
   }
@@ -537,14 +536,6 @@ self.onmessage = (e) => {
     }
     return;
   }
-
-  // Filter moves that are "good enough" (within the threshold of the best score)
-  const bestMoves = moveResults
-    .filter(r => r.score >= maxVal - RANDOMNESS_THRESHOLD)
-    .map(r => r.move);
-
-  // Pick a random move from candidates
-  const bestM = bestMoves[Math.floor(Math.random() * bestMoves.length)];
 
   const bestMoveStr = bestM.type === 'SUMMON' ? `SUMMON ${bestM.piece} to ${bestM.to}` : `MOVE ${bestM.from}->${bestM.to}`;
   console.log(`AI search finished. Best move: ${bestMoveStr}. Score: ${maxVal}. Time: ${Date.now() - startTime}ms`);
