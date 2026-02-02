@@ -93,23 +93,39 @@ function load() {
   try {
     if (fs.existsSync(DATA_FILE)) {
       const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-      const data = JSON.parse(raw);
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch (e) {
+        console.error('Invalid JSON in store.json');
+        return;
+      }
 
-      if (data.rooms) {
-        data.rooms.forEach(([key, val]: [string, RoomInfo]) => {
-          rooms.set(key, val);
+      if (Array.isArray(data.rooms)) {
+        data.rooms.forEach((entry: any) => {
+          if (Array.isArray(entry) && entry.length === 2) {
+            rooms.set(entry[0], entry[1]);
+          }
         });
       }
 
-      if (data.users) {
-        data.users.forEach(([key, val]: [string, User]) => {
-          users.set(key, val);
+      if (Array.isArray(data.users)) {
+        data.users.forEach((entry: any) => {
+          if (Array.isArray(entry) && entry.length === 2) {
+            users.set(entry[0], entry[1]);
+          }
         });
       }
 
-      if (data.games) {
-        data.games.forEach(([key, val]: [string, any]) => {
-          games.set(key, SummonChessGame.deserialize(val));
+      if (Array.isArray(data.games)) {
+        data.games.forEach((entry: any) => {
+          if (Array.isArray(entry) && entry.length === 2) {
+            try {
+              games.set(entry[0], SummonChessGame.deserialize(entry[1]));
+            } catch (e) {
+              console.error(`Failed to deserialize game ${entry[0]}:`, e);
+            }
+          }
         });
       }
     }

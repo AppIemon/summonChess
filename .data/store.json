@@ -1,5 +1,36 @@
 {
-  "rooms": [],
+  "rooms": [
+    [
+      "3FUETH",
+      {
+        "roomCode": "3FUETH",
+        "hostId": "11604e92-d307-4cab-b2b7-3682b1a20abe",
+        "hostNickname": "Player 1160",
+        "hostElo": 400,
+        "spectators": [],
+        "status": "playing",
+        "createdAt": 1770008185084,
+        "guestId": "BOT",
+        "guestNickname": "Bot (Lv.1)",
+        "gameId": "UNPUT0"
+      }
+    ],
+    [
+      "PDPSPT",
+      {
+        "roomCode": "PDPSPT",
+        "hostId": "11604e92-d307-4cab-b2b7-3682b1a20abe",
+        "hostNickname": "Player 1160",
+        "hostElo": 400,
+        "spectators": [],
+        "status": "playing",
+        "createdAt": 1770008406860,
+        "guestId": "BOT",
+        "guestNickname": "Bot (Lv.1)",
+        "gameId": "5ZB5SP"
+      }
+    ]
+  ],
   "users": [
     [
       "11604e92-d307-4cab-b2b7-3682b1a20abe",
@@ -13,5 +44,104 @@
       }
     ]
   ],
-  "games": []
+  "games": [
+    [
+      "UNPUT0",
+      {
+        "fen": "4k3/8/8/8/8/8/3R4/4K3 b - - 0 1",
+        "whiteDeck": [
+          "q",
+          "r",
+          "b",
+          "b",
+          "n",
+          "n",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p"
+        ],
+        "blackDeck": [
+          "q",
+          "r",
+          "r",
+          "b",
+          "b",
+          "n",
+          "n",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p"
+        ],
+        "whitePlayerId": "11604e92-d307-4cab-b2b7-3682b1a20abe",
+        "blackPlayerId": "BOT",
+        "whiteTime": 586.568,
+        "blackTime": 600,
+        "lastActionTimestamp": 1770008205127,
+        "chat": [],
+        "isTimeout": false,
+        "historyList": [
+          "R@d2"
+        ]
+      }
+    ],
+    [
+      "5ZB5SP",
+      {
+        "fen": "4k3/8/8/8/8/8/3R4/4K3 b - - 0 1",
+        "whiteDeck": [
+          "q",
+          "r",
+          "b",
+          "b",
+          "n",
+          "n",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p"
+        ],
+        "blackDeck": [
+          "q",
+          "r",
+          "r",
+          "b",
+          "b",
+          "n",
+          "n",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p"
+        ],
+        "whitePlayerId": "11604e92-d307-4cab-b2b7-3682b1a20abe",
+        "blackPlayerId": "BOT",
+        "whiteTime": 595.034,
+        "blackTime": 600,
+        "lastActionTimestamp": 1770008414787,
+        "chat": [],
+        "isTimeout": false,
+        "historyList": [
+          "R@d2"
+        ]
+      }
+    ]
+  ]
 }
