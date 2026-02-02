@@ -284,39 +284,102 @@ class AiGameState {
 
   evaluate(): number {
     let score = 0;
+
+    // 1. Piece Material & Position
     for (let i = 0; i < 64; i++) {
       if (this.board[i] === 0) continue;
       const p = Math.abs(this.board[i]);
+      const x = i % 8, y = Math.floor(i / 8);
       const side = this.board[i] > 0 ? 1 : -1;
+
       let v = PIECE_VALS[p];
+
+      // Promotion bonus
       if (p === PAWN) {
-        const y = Math.floor(i / 8);
-        if ((side === WHITE && y === 6) || (side === BLACK && y === 1)) v = 200;
+        if ((side === WHITE && y === 6) || (side === BLACK && y === 1)) v += 150;
       }
+
+      // Center control bonus (squares d4, d5, e4, e5 are index 27,28,35,36)
+      const distToCenter = Math.max(Math.abs(x - 3.5), Math.abs(y - 3.5));
+      v += (4 - distToCenter) * 10;
+
       score += side * v;
     }
+
+    // 2. Reserve Material
     for (let p = 1; p <= 5; p++) {
       score += this.reserve[1][p] * PIECE_VALS[p];
       score -= this.reserve[0][p] * PIECE_VALS[p];
     }
-    if (this.isInCheck(-this.turn)) score += (this.turn === WHITE ? 500 : -500);
-    if (this.isInCheck(this.turn)) score -= (this.turn === WHITE ? 500 : -500);
+
+    // 3. Mobility & Control
+    const whiteMoves = this.turn === WHITE ? this.generateMoves().length : 0;
+    // (In a real engine we'd calculate mobility for both, but for speed we estimate)
+    score += whiteMoves * 5;
+
+    // 4. Check & King Safety
+    // Check is VERY good for the side that made it
+    const whiteInCheck = this.isInCheck(WHITE);
+    const blackInCheck = this.isInCheck(BLACK);
+
+    if (whiteInCheck) score -= 1000;
+    if (blackInCheck) score += 1000;
+
+    // Extra bonus for "Check if I can"
+    // This is already reflected slightly in material but Let's add more
+    // if opponent is in check, it gives us tempo
+
     return this.turn === WHITE ? score : -score;
   }
 }
 
+const MATE_SCORE = 50000;
+
 function scoreMove(gs: AiGameState, m: Move): number {
-  if (m.type === 'SUMMON') return 10;
+  if (m.type === 'SUMMON') return 20; // Slightly higher base for summons
   let score = 0;
+
+  // Captures
   if (m.captured) {
     score = 1000 + (Math.abs(m.captured) * 10) - Math.abs(gs.board[m.from]);
   }
+
+  // Promotions
   if (m.promo) score += 900;
+
+  // Prioritize Checks in move ordering
+  const prevState = gs.captureState();
+  gs.makeMove(m);
+  if (gs.isInCheck(gs.turn * -1)) {
+    score += 1500;
+  }
+  gs.undoMove(m, prevState);
+
   return score;
 }
 
+function quiescence(gs: AiGameState, alpha: number, beta: number): number {
+  const standPat = gs.evaluate();
+  if (standPat >= beta) return beta;
+  if (alpha < standPat) alpha = standPat;
+
+  const moves = gs.generateMoves().filter(m => m.captured !== 0 || m.promo !== 0);
+  moves.sort((a, b) => scoreMove(gs, b) - scoreMove(gs, a));
+
+  for (const m of moves) {
+    const prevState = gs.captureState();
+    gs.makeMove(m);
+    const val = -quiescence(gs, -beta, -alpha);
+    gs.undoMove(m, prevState);
+
+    if (val >= beta) return beta;
+    if (val > alpha) alpha = val;
+  }
+  return alpha;
+}
+
 function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number): number {
-  if (depth === 0) return gs.evaluate();
+  if (depth === 0) return quiescence(gs, alpha, beta);
 
   const hashIdx = Number(gs.currentHash % BigInt(TT_SIZE));
   const entry = TT[hashIdx];
@@ -328,12 +391,17 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number):
   }
 
   const moves = gs.generateMoves();
-  if (moves.length === 0) return -50000;
+  if (moves.length === 0) {
+    // If in check and no moves, it's checkmate
+    if (gs.isInCheck(gs.turn)) return -MATE_SCORE - depth;
+    return 0; // Stalemate
+  }
 
   moves.sort((a, b) => scoreMove(gs, b) - scoreMove(gs, a));
 
   let flag = 1;
   let bestVal = -INF;
+  let bestM: Move | null = null;
 
   for (const m of moves) {
     const prevState = gs.captureState();
@@ -343,6 +411,7 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number):
 
     if (val > bestVal) {
       bestVal = val;
+      bestM = m;
     }
     if (val >= beta) {
       TT[hashIdx] = { hash: gs.currentHash, depth, score: val, flag: 2, bestMove: m };
@@ -354,7 +423,7 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number):
     }
   }
 
-  TT[hashIdx] = { hash: gs.currentHash, depth, score: bestVal, flag, bestMove: null };
+  TT[hashIdx] = { hash: gs.currentHash, depth, score: bestVal, flag, bestMove: bestM };
   return bestVal;
 }
 
@@ -374,6 +443,7 @@ self.onmessage = (e) => {
     return;
   }
 
+  // Pre-sort moves
   moves.sort((a, b) => scoreMove(gs, b) - scoreMove(gs, a));
 
   let bestM = moves[0];
@@ -392,8 +462,8 @@ self.onmessage = (e) => {
     alpha = Math.max(alpha, val);
   }
 
-  // Check for resignation: if position is extremely bad (less than -15000)
-  if (maxVal < -15000) {
+  // Resignation check
+  if (maxVal < -MATE_SCORE + 100) {
     self.postMessage({ type: 'RESIGN' });
   } else {
     self.postMessage({ type: 'MOVE', move: bestM });
