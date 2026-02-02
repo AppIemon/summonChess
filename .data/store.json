@@ -1,14 +1,17 @@
 {
-  "games": [],
-  "rooms": [
-    {
-      "code": "KDAYMM",
-      "info": {
-        "roomCode": "KDAYMM",
-        "hostId": "11604e92-d307-4cab-b2b7-3682b1a20abe",
-        "status": "waiting",
-        "createdAt": 1769940314212
+  "rooms": [],
+  "users": [
+    [
+      "11604e92-d307-4cab-b2b7-3682b1a20abe",
+      {
+        "id": "11604e92-d307-4cab-b2b7-3682b1a20abe",
+        "nickname": "Player 1160",
+        "elo": 400,
+        "gamesPlayed": 0,
+        "tier": "Beginner",
+        "createdAt": 1770008051402
       }
-    }
-  ]
+    ]
+  ],
+  "games": []
 }

@@ -160,7 +160,7 @@ export const GameStore = {
 
   // Game management
   createGame(id: string, whitePlayerId?: string, blackPlayerId?: string) {
-    const game = new SummonChessGame();
+    const game = new SummonChessGame(undefined, undefined, undefined, whitePlayerId, blackPlayerId);
     // Initialize game with player IDs if needed
     games.set(id, game);
     return game;
@@ -217,7 +217,7 @@ export const GameStore = {
     if (room.status !== 'waiting') return { success: false, error: 'Game already active' };
     if (room.guestId) return { success: false, error: 'Room is full' };
 
-    room.guestId = 'bot';
+    room.guestId = 'BOT';
     room.guestNickname = 'Bot (Lv.1)';
     persist();
 
