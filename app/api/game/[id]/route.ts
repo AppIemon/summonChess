@@ -54,8 +54,8 @@ export async function POST(
           if (whiteUser && blackUser) {
             // Determine score for White
             let score = 0.5;
-            if (state.winner === 'white') score = 1;
-            else if (state.winner === 'black') score = 0;
+            if (state.winner === 'w') score = 1;
+            else if (state.winner === 'b') score = 0;
             // If draw, score 0.5
 
             const newWhiteElo = calculateNewElo(whiteUser.elo, blackUser.elo, score as any, whiteUser.gamesPlayed);

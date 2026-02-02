@@ -80,8 +80,8 @@ function persist() {
     ensureDir();
     const data = {
       rooms: Array.from(rooms.entries()),
-      // Don't persist games (too large/complex object), only rooms and users
       users: Array.from(users.entries()),
+      games: Array.from(games.entries()).map(([id, game]) => [id, game.serialize()]),
     };
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
   } catch (e) {
@@ -104,6 +104,12 @@ function load() {
       if (data.users) {
         data.users.forEach(([key, val]: [string, User]) => {
           users.set(key, val);
+        });
+      }
+
+      if (data.games) {
+        data.games.forEach(([key, val]: [string, any]) => {
+          games.set(key, SummonChessGame.deserialize(val));
         });
       }
     }
@@ -166,7 +172,7 @@ export const GameStore = {
 
   saveGame(id: string, game: SummonChessGame) {
     games.set(id, game);
-    // Note: We don't persist full game state to disk on every move for performance
+    persist();
   },
 
   deleteGame(id: string) {
@@ -195,7 +201,14 @@ export const GameStore = {
   },
 
   getRoom(roomCode: string): RoomInfo | undefined {
-    return rooms.get(roomCode);
+    const room = rooms.get(roomCode);
+    // Consistency check: If room says playing but game is missing, reset it
+    if (room && room.status === 'playing' && room.gameId && !games.has(room.gameId)) {
+      room.status = 'waiting';
+      room.gameId = undefined;
+      persist();
+    }
+    return room;
   },
 
   addBot(roomCode: string): { success: boolean; error?: string } {
@@ -353,8 +366,12 @@ export const GameStore = {
   cleanupOldRooms() {
     const now = Date.now();
     for (const [code, room] of rooms.entries()) {
-      // Delete empty rooms older than 1 hour
-      if (now - room.createdAt > 3600000) {
+      // Delete empty waiting/finished rooms older than 1 hour
+      if (room.status !== 'playing' && now - room.createdAt > 3600000) {
+        rooms.delete(code);
+      }
+      // Delete stale playing rooms older than 24 hours
+      if (room.status === 'playing' && now - room.createdAt > 86400000) {
         rooms.delete(code);
       }
     }
