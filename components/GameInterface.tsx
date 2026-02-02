@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import useSWR from 'swr';
 import Board from './Board';
 import Hand from './Hand';
@@ -290,17 +290,26 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   // Trigger victory animation
   useEffect(() => {
     const isGameOver = gameState?.isCheckmate || gameState?.isTimeout || gameState?.isStalemate || gameState?.isDraw || (gameState?.winner);
-    if (isGameOver && !showVictory) {
-      setFinalResult({
-        winner: gameState.winner,
-        isTimeout: gameState.isTimeout,
-        isStalemate: gameState.isStalemate,
-        isCheckmate: gameState.isCheckmate,
-        isDraw: gameState.isDraw
-      });
-      setShowVictory(true);
+
+    if (isGameOver) {
+      if (!finalResult) {
+        setFinalResult({
+          winner: gameState.winner,
+          isTimeout: gameState.isTimeout,
+          isStalemate: gameState.isStalemate,
+          isCheckmate: gameState.isCheckmate,
+          isDraw: gameState.isDraw
+        });
+        setShowVictory(true);
+      }
+    } else {
+      // Game is not over (maybe reset)
+      if (finalResult) {
+        setFinalResult(null);
+        setShowVictory(false);
+      }
     }
-  }, [gameState, showVictory]);
+  }, [gameState, finalResult]);
 
   // Handle AI turn
   useEffect(() => {
@@ -564,6 +573,10 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
     await executeAction({ type: 'undo_response', accept });
   };
 
+  const handleCloseVictory = useCallback(() => {
+    setShowVictory(false);
+  }, []);
+
   return (
     <div className={styles.container}>
       {showVictory && finalResult && (
@@ -572,7 +585,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
           isTimeout={finalResult.isTimeout}
           isStalemate={finalResult.isStalemate}
           isCheckmate={finalResult.isCheckmate}
-          onAutoClose={() => setShowVictory(false)}
+          onAutoClose={handleCloseVictory}
         />
       )}
 
