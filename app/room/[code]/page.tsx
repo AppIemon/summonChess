@@ -213,26 +213,6 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
             >
               초대 코드 복사
             </button>
-            {isHost && !isFull && !room.guestId && (
-              <button
-                className={styles.secondaryButton}
-                onClick={async () => {
-                  if (!confirm('AI 상대를 추가하시겠습니까?')) return;
-                  try {
-                    const res = await fetch(`/api/room/${roomCode}`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ playerId, action: 'addBot' })
-                    });
-                    if (!res.ok) alert('AI 추가 실패');
-                  } catch (e) {
-                    alert('오류 발생');
-                  }
-                }}
-              >
-                🤖 AI 추가
-              </button>
-            )}
             {!isPlaying && !isFull && (
               <button
                 className={styles.primaryButton}
@@ -338,29 +318,6 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
               disabled={!room.guestId}
             >
               {room.guestId ? '🎮 게임 시작' : '대기 중...'}
-            </button>
-          )}
-          {isHost && !room.guestId && (
-            <button
-              className={styles.secondaryButton}
-              onClick={async () => {
-                if (!confirm('AI 상대를 추가하시겠습니까?')) return;
-                try {
-                  const res = await fetch(`/api/room/${roomCode}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ playerId, action: 'addBot' })
-                  });
-                  if (!res.ok) {
-                    const data = await res.json();
-                    alert(data.error || 'AI 추가 실패');
-                  }
-                } catch (e) {
-                  alert('오류 발생');
-                }
-              }}
-            >
-              🤖 AI 추가
             </button>
           )}
           {!isHost && room.status === 'waiting' && room.guestId === playerId && (

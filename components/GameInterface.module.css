@@ -499,3 +499,104 @@
     width: 100%;
   }
 }
+
+/* Undo Overlay */
+.undoOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.undoCard {
+  background: white;
+  padding: 30px;
+  border-radius: 20px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+  text-align: center;
+  max-width: 400px;
+  width: 90%;
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.undoCard h3 {
+  margin-top: 0;
+  color: #1a1a2e;
+  font-size: 1.5rem;
+}
+
+.undoCard p {
+  color: #555;
+  margin: 15px 0 25px;
+}
+
+.undoButtons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.confirmBtn {
+  background: #2ecc71 !important;
+  color: white !important;
+  border: none !important;
+}
+
+.declineBtn {
+  background: #e74c3c !important;
+  color: white !important;
+  border: none !important;
+}
+
+.waitingUndo {
+  font-style: italic;
+  color: #888;
+}
+
+.analysisTools {
+  margin-top: 20px;
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  max-width: 600px;
+}
+
+.analysisTools input {
+  flex: 1;
+  padding: 10px 15px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  font-family: monospace;
+}
+
+.analysisTools button {
+  padding: 10px 20px;
+  background: #34495e;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.analysisTools button:hover {
+  background: #2c3e50;
+}

@@ -6,7 +6,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
 
-    let { playerId, nickname } = body; // Nickname might be undefined now
+    let { playerId, nickname } = body;
 
     if (!playerId) {
       return NextResponse.json(
@@ -16,21 +16,17 @@ export async function POST(request: Request) {
     }
 
     // Ensure user is registered
-    const user = GameStore.registerUser(playerId);
+    const user = await GameStore.registerUser(playerId);
 
-    // Use stored nickname if "nickname" payload is missing or we want to enforce consistency
-    // But for now, let's allow updating nickname if provided? 
-    // Actually, task says "remove nickname input". So we rely on "Player XXXX".
-    // Or if we want to allow renaming later.
-    // Let's just use what's in the store if nickname arg is not provided.
+    // Use stored nickname if "nickname" payload is missing
     const finalNickname = nickname || user.nickname;
 
-    // (Optional) Update nickname if provided and different
+    // Update nickname if provided and different
     if (nickname && nickname !== user.nickname) {
-      GameStore.updateUser(playerId, { nickname });
+      await GameStore.updateUser(playerId, { nickname });
     }
 
-    const room = GameStore.createRoom(playerId, finalNickname);
+    const room = await GameStore.createRoom(playerId, finalNickname);
     return NextResponse.json({
       success: true,
       roomCode: room.roomCode,

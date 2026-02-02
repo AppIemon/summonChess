@@ -33,6 +33,10 @@ export interface GameState {
   isTimeout: boolean;
   chat: ChatMessage[];
   roomCode?: string;
+  undoRequest?: {
+    from: PieceColor;
+    status: 'pending' | 'accepted' | 'declined';
+  } | null;
 }
 
 export interface MoveAction {
@@ -58,4 +62,13 @@ export interface ChatAction {
   nickname: string;
 }
 
-export type Action = MoveAction | SummonAction | ResignAction | ChatAction;
+export interface UndoRequestAction {
+  type: 'undo_request';
+}
+
+export interface UndoResponseAction {
+  type: 'undo_response';
+  accept: boolean;
+}
+
+export type Action = MoveAction | SummonAction | ResignAction | ChatAction | UndoRequestAction | UndoResponseAction;

@@ -10,6 +10,8 @@ export class SummonChessGame {
   private whitePlayerId?: string;
   private blackPlayerId?: string;
   private resignedBy?: PieceColor;
+  private roomCode?: string;
+  private undoRequest: { from: PieceColor, status: 'pending' | 'accepted' | 'declined' } | null = null;
 
   private whiteTime: number = 600; // 10 minutes
   private blackTime: number = 600;
@@ -17,8 +19,9 @@ export class SummonChessGame {
   private chat: ChatMessage[] = [];
   private isTimeout: boolean = false;
   private historyList: string[] = [];
+  private stateStack: string[] = []; // Stack of serialized states for undo
 
-  constructor(fen?: string, whiteDeck?: PieceType[], blackDeck?: PieceType[], whitePlayerId?: string, blackPlayerId?: string, historyList?: string[]) {
+  constructor(fen?: string, whiteDeck?: PieceType[], blackDeck?: PieceType[], whitePlayerId?: string, blackPlayerId?: string, historyList?: string[], roomCode?: string) {
     this.chess = new Chess(fen || '4k3/8/8/8/8/8/8/4K3 w - - 0 1');
     const defaultDeck: PieceType[] = ['q', 'r', 'r', 'b', 'b', 'n', 'n', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'];
     this.whiteDeck = whiteDeck ? [...whiteDeck] : [...defaultDeck];
@@ -27,6 +30,8 @@ export class SummonChessGame {
     this.blackPlayerId = blackPlayerId;
     this.lastActionTimestamp = Date.now();
     if (historyList) this.historyList = [...historyList];
+    this.roomCode = roomCode;
+    this.stateStack = []; // Initialize empty stack
   }
 
   public getState(): GameState {
@@ -68,6 +73,8 @@ export class SummonChessGame {
       blackTime: Math.floor(currentBlackTime),
       isTimeout: currentIsTimeout,
       chat: [...this.chat],
+      roomCode: this.roomCode,
+      undoRequest: this.undoRequest,
     };
   }
 
@@ -99,6 +106,10 @@ export class SummonChessGame {
     }
 
     if (this.checkGameOver()) return { success: false, error: "Game Over" };
+
+    // Capture state BEFORE action for undo
+    this.stateStack.push(JSON.stringify(this.serialize()));
+    if (this.stateStack.length > 50) this.stateStack.shift(); // Limit history
 
     const now = Date.now();
     const elapsed = (now - this.lastActionTimestamp) / 1000;
@@ -146,8 +157,50 @@ export class SummonChessGame {
       else if (effectivePlayerId === this.blackPlayerId) this.resignedBy = 'b';
       else this.resignedBy = turn;
       return { success: true };
+    } else if (action.type === 'undo_request') {
+      if (this.undoRequest?.status === 'pending') return { success: false, error: "Undo request already pending" };
+      this.undoRequest = { from: turn, status: 'pending' };
+      return { success: true };
+    } else if (action.type === 'undo_response') {
+      if (!this.undoRequest || this.undoRequest.status !== 'pending') return { success: false, error: "No pending undo request" };
+      if (this.undoRequest.from === turn) return { success: false, error: "Cannot respond to your own request" };
+
+      if (action.accept) {
+        this.undo();
+        this.undoRequest = null;
+      } else {
+        this.undoRequest.status = 'declined';
+        // Auto-clear declined status after some time or next move?
+        // For now, let's just clear it.
+        setTimeout(() => { if (this.undoRequest?.status === 'declined') this.undoRequest = null; }, 5000);
+      }
+      return { success: true };
     }
     return { success: false, error: "Invalid action" };
+  }
+
+  public undo(): { success: boolean, error?: string } {
+    if (this.stateStack.length === 0) return { success: false, error: "No history to undo" };
+
+    const previousStateJson = this.stateStack.pop();
+    if (!previousStateJson) return { success: false, error: "Undo failed" };
+
+    const data = JSON.parse(previousStateJson);
+    this.chess.load(data.fen);
+    this.whiteDeck = [...data.whiteDeck];
+    this.blackDeck = [...data.blackDeck];
+    this.whitePlayerId = data.whitePlayerId;
+    this.blackPlayerId = data.blackPlayerId;
+    this.resignedBy = data.resignedBy;
+    this.whiteTime = data.whiteTime;
+    this.blackTime = data.blackTime;
+    this.lastActionTimestamp = data.lastActionTimestamp;
+    this.chat = [...data.chat];
+    this.isTimeout = data.isTimeout;
+    this.historyList = [...data.historyList];
+    this.lastMove = null; // We can improve this if we store lastMove in serialize
+
+    return { success: true };
   }
 
   private summonPiece(piece: PieceType, square: Square): { success: boolean, error?: string } {
@@ -163,6 +216,10 @@ export class SummonChessGame {
     if (piece === 'p' && (rank === 1 || rank === 8)) return { success: false, error: "Invalid pawn rank" };
 
     if (!this.chess.put({ type: piece, color: turn }, square)) return { success: false, error: "Put failed" };
+
+    // Clear undo request on new move/summon
+    this.undoRequest = null;
+
     if (this.chess.inCheck()) {
       this.chess.remove(square);
       return { success: false, error: "Results in self-check" };
@@ -247,18 +304,22 @@ export class SummonChessGame {
       whitePlayerId: this.whitePlayerId, blackPlayerId: this.blackPlayerId,
       resignedBy: this.resignedBy, whiteTime: this.whiteTime, blackTime: this.blackTime,
       lastActionTimestamp: this.lastActionTimestamp, chat: this.chat, isTimeout: this.isTimeout,
-      historyList: this.historyList,
+      historyList: this.historyList, stateStack: this.stateStack, roomCode: this.roomCode,
+      undoRequest: this.undoRequest, lastMove: this.lastMove
     };
   }
 
   static deserialize(data: any): SummonChessGame {
-    const game = new SummonChessGame(data.fen, data.whiteDeck, data.blackDeck, data.whitePlayerId, data.blackPlayerId, data.historyList);
+    const game = new SummonChessGame(data.fen, data.whiteDeck, data.blackDeck, data.whitePlayerId, data.blackPlayerId, data.historyList, data.roomCode);
     if (data.resignedBy) game.resignedBy = data.resignedBy;
     if (data.whiteTime !== undefined) game.whiteTime = data.whiteTime;
     if (data.blackTime !== undefined) game.blackTime = data.blackTime;
     if (data.lastActionTimestamp !== undefined) game.lastActionTimestamp = data.lastActionTimestamp;
     if (data.chat !== undefined) game.chat = data.chat;
     if (data.isTimeout !== undefined) game.isTimeout = data.isTimeout;
+    if (data.stateStack !== undefined) game.stateStack = data.stateStack;
+    if (data.undoRequest !== undefined) game.undoRequest = data.undoRequest;
+    if (data.lastMove !== undefined) game.lastMove = data.lastMove;
     return game;
   }
 }

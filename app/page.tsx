@@ -184,6 +184,14 @@ export default function Home() {
               >
                 방 참가하기
               </button>
+
+              <button
+                className={styles.secondaryButton}
+                onClick={() => router.push('/analysis')}
+                disabled={loading || isSearching}
+              >
+                🔬 분석 (혼자하기)
+              </button>
             </div>
           ) : (
             <div className={styles.joinSection}>

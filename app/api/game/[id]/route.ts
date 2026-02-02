@@ -8,14 +8,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const game = GameStore.getGame(id);
+  const game = await GameStore.getGame(id);
 
   if (!game) {
     return NextResponse.json({ error: 'Game not found' }, { status: 404 });
   }
 
   const state = game.getState();
-  state.roomCode = GameStore.getRoomCodeByGameId(id);
+  state.roomCode = await GameStore.getRoomCodeByGameId(id);
 
   return NextResponse.json(state);
 }
@@ -25,7 +25,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const game = GameStore.getGame(id);
+  const game = await GameStore.getGame(id);
 
   if (!game) {
     return NextResponse.json({ error: 'Game not found' }, { status: 404 });
@@ -36,33 +36,29 @@ export async function POST(
     const result = game.executeAction(action);
 
     if (result.success) {
-      GameStore.saveGame(id, game);
+      await GameStore.saveGame(id, game);
       const state = game.getState();
 
       // Check for game end
       if (state.winner || state.isDraw) {
-        // Need player IDs. Assuming they are on the game instance or state.
-        // If not on state, we might need to rely on the room info or assume game instance has them.
-        // Let's assume game.whitePlayerId and game.blackPlayerId are available.
         const whiteId = (game as any).whitePlayerId;
         const blackId = (game as any).blackPlayerId;
 
-        if (whiteId && blackId) {
-          const whiteUser = GameStore.getUser(whiteId);
-          const blackUser = GameStore.getUser(blackId);
+        if (whiteId && blackId && blackId !== 'BOT') {
+          const whiteUser = await GameStore.getUser(whiteId);
+          const blackUser = await GameStore.getUser(blackId);
 
           if (whiteUser && blackUser) {
             // Determine score for White
             let score = 0.5;
             if (state.winner === 'w') score = 1;
             else if (state.winner === 'b') score = 0;
-            // If draw, score 0.5
 
             const newWhiteElo = calculateNewElo(whiteUser.elo, blackUser.elo, score as any, whiteUser.gamesPlayed);
             const newBlackElo = calculateNewElo(blackUser.elo, whiteUser.elo, (1 - score) as any, blackUser.gamesPlayed);
 
-            GameStore.updateUser(whiteId, { elo: newWhiteElo, gamesPlayed: whiteUser.gamesPlayed + 1 });
-            GameStore.updateUser(blackId, { elo: newBlackElo, gamesPlayed: blackUser.gamesPlayed + 1 });
+            await GameStore.updateUser(whiteId, { elo: newWhiteElo, gamesPlayed: whiteUser.gamesPlayed + 1 });
+            await GameStore.updateUser(blackId, { elo: newBlackElo, gamesPlayed: blackUser.gamesPlayed + 1 });
           }
         }
       }
@@ -76,4 +72,3 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 }
-

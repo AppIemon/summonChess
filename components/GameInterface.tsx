@@ -7,7 +7,7 @@ import Hand from './Hand';
 import { GameState, PieceType, PieceColor, ChatMessage, Action } from '@/lib/game/types';
 import styles from './GameInterface.module.css';
 import { Chess, Square } from 'chess.js';
-import { SimpleEngine } from '../lib/game/ai';
+import { SummonChessGame } from '@/lib/game/engine';
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -22,6 +22,7 @@ const fetcher = async (url: string) => {
 
 interface GameInterfaceProps {
   gameId: string;
+  isAnalysis?: boolean;
 }
 
 // Timer sub-component for smooth countdown
@@ -123,12 +124,26 @@ function CheckmateOverlay({ winner, isTimeout }: { winner: PieceColor, isTimeout
   );
 }
 
-export default function GameInterface({ gameId }: GameInterfaceProps) {
-  const { data: gameState, mutate, error } = useSWR<GameState>(
-    `/api/game/${gameId}`,
+export default function GameInterface({ gameId, isAnalysis = false }: GameInterfaceProps) {
+  const { data: serverGameState, mutate, error } = useSWR<GameState>(
+    isAnalysis ? null : `/api/game/${gameId}`,
     fetcher,
     { refreshInterval: 1000 }
   );
+
+  const [localGame, setLocalGame] = useState<SummonChessGame | null>(null);
+  const [localGameState, setLocalGameState] = useState<GameState | null>(null);
+
+  useEffect(() => {
+    if (isAnalysis) {
+      const game = new SummonChessGame();
+      setLocalGame(game);
+      setLocalGameState(game.getState());
+      setMyColor('w');
+    }
+  }, [isAnalysis]);
+
+  const gameState = isAnalysis ? localGameState : serverGameState;
 
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [selectedHandPiece, setSelectedHandPiece] = useState<PieceType | null>(null);
@@ -161,6 +176,22 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
   }, [gameState?.history, activeTab]);
 
   const executeAction = async (action: any) => {
+    if (isAnalysis && localGame) {
+      if (action.type === 'undo_request') {
+        localGame.undo();
+        setLocalGameState(localGame.getState());
+        return;
+      }
+      const res = localGame.executeAction(action);
+      if (res.success) {
+        setLocalGameState(localGame.getState());
+        setSelectedSquare(null);
+        setSelectedHandPiece(null);
+        setValidTargetSquares([]);
+      }
+      return;
+    }
+
     const res = await fetch(`/api/game/${gameId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -182,42 +213,14 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
     }
   };
 
-  // Bot Logic
-  const isBotThinking = useRef(false);
-  useEffect(() => {
-    if (!gameState || gameState.winner || isBotThinking.current) return;
-
-    const isWhite = playerId === gameState.whitePlayerId;
-    const isBotGame = gameState.blackPlayerId === 'BOT'; // Assuming Bot is always Black for now (added by Host)
-
-    // If it's a Bot game, and I am the Host (White), and it's Black's turn (Bot's turn)
-    if (isBotGame && isWhite && gameState.turn === 'b') {
-      isBotThinking.current = true;
-
-      // Small delay for realism
-      setTimeout(async () => {
-        const engine = new SimpleEngine(2); // Depth 2
-        const bestAction = await engine.getBestMove(gameState.fen, gameState.whiteDeck, gameState.blackDeck);
-
-        if (bestAction) {
-          await executeAction({ ...bestAction, playerId: 'BOT', nickname: '🤖 알파고' });
-        }
-        isBotThinking.current = false;
-      }, 1000);
-    }
-  }, [gameState, playerId, executeAction]);
+  // Bot Logic Removed
 
   // Spectator status
   const isSpectator = useMemo(() => {
+    if (isAnalysis) return false;
     if (!gameState || !playerId) return false;
-    // Special case: if I am Host playing against Bot, I am NOT spectator.
-    // Logic: Spectator if ID is neither White nor Black.
-    // But if Black is 'BOT', and I am 'White', 
-    // playerId !== 'BOT' is true.
-    // playerId === White is true.
-    // So isSpectator is false. Correct.
     return playerId !== gameState.whitePlayerId && playerId !== gameState.blackPlayerId;
-  }, [gameState, playerId]);
+  }, [gameState, playerId, isAnalysis]);
 
   // Automatic orientation
   useEffect(() => {
@@ -257,12 +260,15 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
 
   // Reset selection when turn changes (if not premoving)
   useEffect(() => {
-    if (!isSpectator && gameState?.turn === myColor) {
+    if (!isAnalysis && !isSpectator && gameState?.turn === myColor) {
       setValidTargetSquares([]);
       setSelectedSquare(null);
       setSelectedHandPiece(null);
     }
-  }, [gameState?.turn, myColor, isSpectator]);
+    if (isAnalysis && gameState) {
+      setMyColor(gameState.turn);
+    }
+  }, [gameState?.turn, myColor, isSpectator, isAnalysis]);
 
   // Error handling: Only show full error screen if we don't have existing state and it's a definitive error
   const isFetchingInitial = !gameState && !error;
@@ -295,7 +301,7 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
   const handleSquareClick = async (square: string) => {
     if (gameState.winner || isSpectator) return;
 
-    if (gameState.turn === myColor) {
+    if (isAnalysis || gameState.turn === myColor) {
       if (selectedHandPiece) {
         if (validTargetSquares.includes(square)) {
           await executeAction({ type: 'summon', piece: selectedHandPiece, square });
@@ -371,7 +377,7 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
     setSelectedHandPiece(piece);
     setSelectedSquare(null);
 
-    if (gameState.turn === myColor) {
+    if (isAnalysis || gameState.turn === myColor) {
       Promise.all([
         import('chess.js'),
         import('@/lib/game/engine')
@@ -382,7 +388,8 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
           for (let c = 0; c < 8; c++) {
             const sq = `${'abcdefgh'[c]}${r}`;
             if (!chess.get(sq as any)) {
-              if (!isReachableByOwnPiece(chess, sq as any, myColor)) continue;
+              const col = isAnalysis ? gameState.turn : myColor;
+              if (!isReachableByOwnPiece(chess, sq as any, col)) continue;
               if (piece === 'p' && (r === 1 || r === 8)) continue;
               valid.push(sq);
             }
@@ -464,10 +471,35 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
   const opponentTime = myColor === 'w' ? gameState.blackTime : gameState.whiteTime;
   const myTime = myColor === 'w' ? gameState.whiteTime : gameState.blackTime;
 
+  const handleUndoRequest = async () => {
+    await executeAction({ type: 'undo_request' });
+  };
+
+  const handleUndoResponse = async (accept: boolean) => {
+    await executeAction({ type: 'undo_response', accept });
+  };
+
   return (
     <div className={styles.container}>
       {showVictory && gameState.winner && (
         <CheckmateOverlay winner={gameState.winner} isTimeout={gameState.isTimeout} />
+      )}
+
+      {gameState.undoRequest && gameState.undoRequest.status === 'pending' && (
+        <div className={styles.undoOverlay}>
+          <div className={styles.undoCard}>
+            <h3>무르기 요청</h3>
+            <p>{gameState.undoRequest.from === 'w' ? '백' : '흑'}이 무르기를 요청했습니다.</p>
+            {gameState.undoRequest.from !== (isAnalysis ? gameState.turn : myColor) ? (
+              <div className={styles.undoButtons}>
+                <button className={styles.confirmBtn} onClick={() => handleUndoResponse(true)}>수락</button>
+                <button className={styles.declineBtn} onClick={() => handleUndoResponse(false)}>거절</button>
+              </div>
+            ) : (
+              <p className={styles.waitingUndo}>상대의 응답을 기다리는 중...</p>
+            )}
+          </div>
+        </div>
       )}
 
       <div className={styles.header}>
@@ -520,7 +552,7 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
           <div className={styles.timerBar}>
             <TimerDisplay
               seconds={isSpectator ? gameState.blackTime : opponentTime}
-              active={!gameState.winner && (isSpectator ? gameState.turn === 'b' : gameState.turn !== myColor)}
+              active={!isAnalysis && !gameState.winner && (isSpectator ? gameState.turn === 'b' : gameState.turn !== myColor)}
             />
           </div>
 
@@ -538,7 +570,7 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
           <div className={styles.timerBar}>
             <TimerDisplay
               seconds={isSpectator ? gameState.whiteTime : myTime}
-              active={!gameState.winner && (isSpectator ? gameState.turn === 'w' : gameState.turn === myColor)}
+              active={!isAnalysis && !gameState.winner && (isSpectator ? gameState.turn === 'w' : gameState.turn === myColor)}
             />
           </div>
 
@@ -646,11 +678,41 @@ export default function GameInterface({ gameId }: GameInterfaceProps) {
 
       <div className={styles.controls}>
         <button onClick={() => setMyColor(myColor === 'w' ? 'b' : 'w')}>🔄 보드 뒤집기</button>
-        <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/room/${gameId}`); alert('링크가 복사되었습니다!'); }}>📋 링크 공유</button>
+        {!isAnalysis && <button onClick={handleUndoRequest} disabled={!!gameState.undoRequest || gameState.history.length === 0}>↩️ 무르기</button>}
+        {isAnalysis && <button onClick={handleUndoRequest} disabled={gameState.history.length === 0}>↩️ 무르기</button>}
+        {!isAnalysis && <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/room/${gameId}`); alert('링크가 복사되었습니다!'); }}>📋 링크 공유</button>}
         <button onClick={() => alert('🎮 조작 가이드\n\n• 왼쪽: 소환 가능한 기물 목록 (클릭 후 보드에 소환)\n• 중앙: 체스 보드 및 타이머\n• 오른쪽: 실시간 채팅\n• 프리무브: 상대 차례에 예약 가능')}>❓ 가이드</button>
-        {!gameState.winner && !isSpectator && <button className={styles.resignButton} onClick={handleResign}>🏳️ 기권</button>}
-        {(gameState.winner || isSpectator) && <button onClick={handleReturnToLobby}>🚪 {isSpectator ? '나가기' : '대기실로'}</button>}
+        {!isAnalysis && !gameState.winner && !isSpectator && <button className={styles.resignButton} onClick={handleResign}>🏳️ 기권</button>}
+        {(isAnalysis || gameState.winner || isSpectator) && <button onClick={() => window.location.href = '/'}>🚪 {isAnalysis ? '그만하기' : (isSpectator ? '나가기' : '대기실로')}</button>}
       </div>
+
+      {isAnalysis && (
+        <div className={styles.analysisTools}>
+          <input
+            type="text"
+            placeholder="FEN 입력..."
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const target = e.target as HTMLInputElement;
+                try {
+                  const newGame = new SummonChessGame(target.value);
+                  setLocalGame(newGame);
+                  setLocalGameState(newGame.getState());
+                  target.value = '';
+                } catch (e) {
+                  alert('올바르지 않은 FEN입니다.');
+                }
+              }
+            }}
+          />
+          <button onClick={() => {
+            if (gameState) {
+              navigator.clipboard.writeText(gameState.fen);
+              alert('현재 FEN이 복사되었습니다.');
+            }
+          }}>현재 FEN 복사</button>
+        </div>
+      )}
     </div>
   );
 }

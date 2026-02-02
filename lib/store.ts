@@ -1,22 +1,10 @@
 import { SummonChessGame } from './game/engine';
-import fs from 'fs';
-import path from 'path';
+import { getDb, COLLECTIONS } from './mongodb';
 import { Tier, getTier } from './rating';
-
-// Storage setup
-const DATA_DIR = path.join(process.cwd(), '.data');
-const DATA_FILE = path.join(DATA_DIR, 'store.json');
-
-// Helper to ensure dir exists
-function ensureDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
 
 export interface User {
   id: string;
-  nickname: string; // e.g. "Player #1234" or "User <ID>"
+  nickname: string;
   elo: number;
   gamesPlayed: number;
   tier: Tier;
@@ -30,7 +18,6 @@ export interface Spectator {
   tier?: Tier;
 }
 
-// Room info type
 export interface RoomInfo {
   roomCode: string;
   hostId: string;
@@ -39,30 +26,25 @@ export interface RoomInfo {
   guestId?: string;
   guestNickname?: string;
   guestElo?: number;
-  spectators: Spectator[]; // Now includes elo info if available
+  spectators: Spectator[];
   gameId?: string;
   status: 'waiting' | 'playing' | 'finished';
   createdAt: number;
 }
 
-// Declare global types
-const globalForStore = globalThis as unknown as {
-  games: Map<string, SummonChessGame>;
-  rooms: Map<string, RoomInfo>;
-  users: Map<string, User>;
-  matchQueue: string[]; // List of user IDs waiting for match
+interface SerializedGame {
+  gameId: string;
+  data: string; // JSON serialized game state
+  updatedAt: number;
+}
+
+// In-memory cache for hot data (optional performance optimization)
+const memoryCache = {
+  games: new Map<string, { game: SummonChessGame; cachedAt: number }>(),
+  rooms: new Map<string, { room: RoomInfo; cachedAt: number }>(),
 };
 
-// Always use globalThis to persist store across HMR in dev and better handle instance sharing
-globalForStore.games = globalForStore.games || new Map<string, SummonChessGame>();
-globalForStore.rooms = globalForStore.rooms || new Map<string, RoomInfo>();
-globalForStore.users = globalForStore.users || new Map<string, User>();
-globalForStore.matchQueue = globalForStore.matchQueue || [];
-
-const games = globalForStore.games;
-const rooms = globalForStore.rooms;
-const users = globalForStore.users;
-const matchQueue = globalForStore.matchQueue;
+const CACHE_TTL = 5000; // 5 seconds cache
 
 // Generate 6-digit room code
 function generateRoomCode(): string {
@@ -74,133 +56,121 @@ function generateRoomCode(): string {
   return result;
 }
 
-// Persistence Helper
-function persist() {
-  try {
-    ensureDir();
-    const data = {
-      rooms: Array.from(rooms.entries()),
-      users: Array.from(users.entries()),
-      games: Array.from(games.entries()).map(([id, game]) => [id, game.serialize()]),
-    };
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-  } catch (e) {
-    console.error('Failed to persist store:', e);
-  }
-}
-
-function load() {
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-      let data;
-      try {
-        data = JSON.parse(raw);
-      } catch (e) {
-        console.error('Invalid JSON in store.json');
-        return;
-      }
-
-      if (Array.isArray(data.rooms)) {
-        data.rooms.forEach((entry: any) => {
-          if (Array.isArray(entry) && entry.length === 2) {
-            rooms.set(entry[0], entry[1]);
-          }
-        });
-      }
-
-      if (Array.isArray(data.users)) {
-        data.users.forEach((entry: any) => {
-          if (Array.isArray(entry) && entry.length === 2) {
-            users.set(entry[0], entry[1]);
-          }
-        });
-      }
-
-      if (Array.isArray(data.games)) {
-        data.games.forEach((entry: any) => {
-          if (Array.isArray(entry) && entry.length === 2) {
-            try {
-              games.set(entry[0], SummonChessGame.deserialize(entry[1]));
-            } catch (e) {
-              console.error(`Failed to deserialize game ${entry[0]}:`, e);
-            }
-          }
-        });
-      }
-    }
-  } catch (e) {
-    console.error('Failed to load store:', e);
-  }
-}
-
-// Initial load
-load();
-
 export const GameStore = {
+  // ========================
   // User Management
-  getUser(userId: string): User | undefined {
-    return users.get(userId);
+  // ========================
+  async getUser(userId: string): Promise<User | undefined> {
+    const db = await getDb();
+    const user = await db.collection<User>(COLLECTIONS.USERS).findOne({ id: userId });
+    return user || undefined;
   },
 
-  registerUser(userId: string): User {
-    if (users.has(userId)) {
-      return users.get(userId)!;
-    }
+  async registerUser(userId: string): Promise<User> {
+    const db = await getDb();
+    const existing = await db.collection<User>(COLLECTIONS.USERS).findOne({ id: userId });
+    if (existing) return existing;
+
     const newUser: User = {
       id: userId,
-      nickname: `Player ${userId.slice(0, 4)}`, // Default nickname
+      nickname: `Player ${userId.slice(0, 4)}`,
       elo: 400,
       gamesPlayed: 0,
       tier: Tier.Beginner,
       createdAt: Date.now(),
     };
-    users.set(userId, newUser);
-    persist();
+    await db.collection(COLLECTIONS.USERS).insertOne(newUser);
     return newUser;
   },
 
-  updateUser(userId: string, data: Partial<User>) {
-    const user = users.get(userId);
-    if (user) {
-      Object.assign(user, data);
+  async updateUser(userId: string, data: Partial<User>): Promise<void> {
+    const db = await getDb();
+    const update: Partial<User> = { ...data };
 
-      // Update derived fields if ELO changed
-      if (data.elo !== undefined) {
-        user.tier = getTier(user.elo);
-      }
-
-      persist();
+    // Update derived tier if ELO changed
+    if (data.elo !== undefined) {
+      update.tier = getTier(data.elo);
     }
+
+    await db.collection(COLLECTIONS.USERS).updateOne(
+      { id: userId },
+      { $set: update }
+    );
   },
 
-  // Game management
-  createGame(id: string, whitePlayerId?: string, blackPlayerId?: string) {
+  // ========================
+  // Game Management
+  // ========================
+  async createGame(id: string, whitePlayerId?: string, blackPlayerId?: string): Promise<SummonChessGame> {
+    const db = await getDb();
     const game = new SummonChessGame(undefined, undefined, undefined, whitePlayerId, blackPlayerId);
-    // Initialize game with player IDs if needed
-    games.set(id, game);
+
+    const serialized: SerializedGame = {
+      gameId: id,
+      data: game.serialize(),
+      updatedAt: Date.now(),
+    };
+    await db.collection(COLLECTIONS.GAMES).insertOne(serialized);
+
+    // Cache it
+    memoryCache.games.set(id, { game, cachedAt: Date.now() });
+
     return game;
   },
 
-  getGame(id: string) {
-    return games.get(id);
+  async getGame(id: string): Promise<SummonChessGame | undefined> {
+    // Check memory cache first
+    const cached = memoryCache.games.get(id);
+    if (cached && Date.now() - cached.cachedAt < CACHE_TTL) {
+      return cached.game;
+    }
+
+    const db = await getDb();
+    const doc = await db.collection<SerializedGame>(COLLECTIONS.GAMES).findOne({ gameId: id });
+    if (!doc) return undefined;
+
+    try {
+      const game = SummonChessGame.deserialize(doc.data);
+      memoryCache.games.set(id, { game, cachedAt: Date.now() });
+      return game;
+    } catch (e) {
+      console.error(`Failed to deserialize game ${id}:`, e);
+      return undefined;
+    }
   },
 
-  saveGame(id: string, game: SummonChessGame) {
-    games.set(id, game);
-    persist();
+  async saveGame(id: string, game: SummonChessGame): Promise<void> {
+    const db = await getDb();
+    await db.collection(COLLECTIONS.GAMES).updateOne(
+      { gameId: id },
+      {
+        $set: {
+          data: game.serialize(),
+          updatedAt: Date.now(),
+        }
+      },
+      { upsert: true }
+    );
+
+    // Update cache
+    memoryCache.games.set(id, { game, cachedAt: Date.now() });
   },
 
-  deleteGame(id: string) {
-    games.delete(id);
+  async deleteGame(id: string): Promise<void> {
+    const db = await getDb();
+    await db.collection(COLLECTIONS.GAMES).deleteOne({ gameId: id });
+    memoryCache.games.delete(id);
   },
 
-  // Room management
-  createRoom(hostId: string, hostNickname: string): RoomInfo {
+  // ========================
+  // Room Management
+  // ========================
+  async createRoom(hostId: string, hostNickname: string): Promise<RoomInfo> {
+    const db = await getDb();
     const code = generateRoomCode();
 
     // Try to get updated user info
-    const hostUser = users.get(hostId);
+    const hostUser = await this.getUser(hostId);
 
     const room: RoomInfo = {
       roomCode: code,
@@ -211,60 +181,77 @@ export const GameStore = {
       status: 'waiting',
       createdAt: Date.now(),
     };
-    rooms.set(code, room);
-    persist();
+
+    await db.collection(COLLECTIONS.ROOMS).insertOne(room);
+    memoryCache.rooms.set(code, { room, cachedAt: Date.now() });
     return room;
   },
 
-  getRoom(roomCode: string): RoomInfo | undefined {
-    const room = rooms.get(roomCode);
-    // Consistency check: If room says playing but game is missing, reset it
-    if (room && room.status === 'playing' && room.gameId && !games.has(room.gameId)) {
-      room.status = 'waiting';
-      room.gameId = undefined;
-      persist();
+  async getRoom(roomCode: string): Promise<RoomInfo | undefined> {
+    // Check cache
+    const cached = memoryCache.rooms.get(roomCode);
+    if (cached && Date.now() - cached.cachedAt < CACHE_TTL) {
+      return cached.room;
     }
+
+    const db = await getDb();
+    const room = await db.collection<RoomInfo>(COLLECTIONS.ROOMS).findOne({ roomCode });
+    if (!room) return undefined;
+
+    // Consistency check: If room says playing but game is missing, reset it
+    if (room.status === 'playing' && room.gameId) {
+      const game = await this.getGame(room.gameId);
+      if (!game) {
+        room.status = 'waiting';
+        room.gameId = undefined;
+        await db.collection(COLLECTIONS.ROOMS).updateOne(
+          { roomCode },
+          { $set: { status: 'waiting', gameId: undefined } }
+        );
+      }
+    }
+
+    memoryCache.rooms.set(roomCode, { room, cachedAt: Date.now() });
     return room;
   },
 
-  addBot(roomCode: string): { success: boolean; error?: string } {
-    const room = rooms.get(roomCode);
-    if (!room) return { success: false, error: 'Room not found' };
-    if (room.status !== 'waiting') return { success: false, error: 'Game already active' };
-    if (room.guestId) return { success: false, error: 'Room is full' };
-
-    room.guestId = 'BOT';
-    room.guestNickname = 'Bot (Lv.1)';
-    persist();
-
-    return { success: true };
-  },
-
-  joinRoom(roomCode: string, playerId: string, nickname: string, asSpectator = false): { success: boolean; error?: string; room?: RoomInfo } {
-    const room = rooms.get(roomCode);
+  async joinRoom(
+    roomCode: string,
+    playerId: string,
+    nickname: string,
+    asSpectator = false
+  ): Promise<{ success: boolean; error?: string; room?: RoomInfo }> {
+    const db = await getDb();
+    const room = await this.getRoom(roomCode);
     if (!room) return { success: false, error: '방을 찾을 수 없습니다.' };
 
-    const user = users.get(playerId);
+    const user = await this.getUser(playerId);
     const safeNickname = user ? user.nickname : nickname;
     const userElo = user?.elo;
     const userTier = user?.tier;
 
     if (asSpectator) {
-      // Check if already in spectators
       if (!room.spectators.some(s => s.id === playerId)) {
-        room.spectators.push({
-          id: playerId,
-          nickname: safeNickname,
-          elo: userElo,
-          tier: userTier
-        });
-        persist();
+        await db.collection(COLLECTIONS.ROOMS).updateOne(
+          { roomCode },
+          {
+            $push: {
+              spectators: {
+                id: playerId,
+                nickname: safeNickname,
+                elo: userElo,
+                tier: userTier
+              }
+            } as any
+          }
+        );
+        memoryCache.rooms.delete(roomCode);
       }
-      return { success: true, room };
+      const updatedRoom = await this.getRoom(roomCode);
+      return { success: true, room: updatedRoom };
     }
 
     if (room.hostId === playerId) {
-      // Re-joining as host?
       return { success: true, room };
     }
 
@@ -273,124 +260,148 @@ export const GameStore = {
       return { success: false, error: '방이 꽉 찼습니다.' };
     }
 
-    room.guestId = playerId;
-    room.guestNickname = safeNickname;
-    room.guestElo = userElo;
-    persist();
+    await db.collection(COLLECTIONS.ROOMS).updateOne(
+      { roomCode },
+      {
+        $set: {
+          guestId: playerId,
+          guestNickname: safeNickname,
+          guestElo: userElo
+        }
+      }
+    );
 
-    return { success: true, room };
+    memoryCache.rooms.delete(roomCode);
+    const updatedRoom = await this.getRoom(roomCode);
+    return { success: true, room: updatedRoom };
   },
 
-  startGame(roomCode: string): { success: boolean; error?: string; gameId?: string } {
-    const room = rooms.get(roomCode);
+  async startGame(roomCode: string): Promise<{ success: boolean; error?: string; gameId?: string }> {
+    const db = await getDb();
+    const room = await this.getRoom(roomCode);
     if (!room) return { success: false, error: 'Room not found' };
 
-    // Check if we have enough players or a bot
     if (!room.guestId) return { success: false, error: 'Not enough players' };
 
-    const gameId = generateRoomCode(); // Unique ID for game
-    const game = this.createGame(gameId, room.hostId, room.guestId);
+    const gameId = generateRoomCode();
+    await this.createGame(gameId, room.hostId, room.guestId);
 
-    room.status = 'playing';
-    room.gameId = gameId;
-    persist();
+    await db.collection(COLLECTIONS.ROOMS).updateOne(
+      { roomCode },
+      { $set: { status: 'playing', gameId } }
+    );
 
+    memoryCache.rooms.delete(roomCode);
     return { success: true, gameId };
   },
 
-  leaveRoom(roomCode: string, playerId: string): void {
-    const room = rooms.get(roomCode);
+  async leaveRoom(roomCode: string, playerId: string): Promise<void> {
+    const db = await getDb();
+    const room = await this.getRoom(roomCode);
     if (!room) return;
 
     if (room.hostId === playerId) {
-      // Host left - destroy room or assign new host?
-      // Simple logic: destroy room
-      rooms.delete(roomCode);
+      await db.collection(COLLECTIONS.ROOMS).deleteOne({ roomCode });
+      memoryCache.rooms.delete(roomCode);
     } else if (room.guestId === playerId) {
-      room.guestId = undefined;
-      room.guestNickname = undefined;
-      room.guestElo = undefined;
+      const update: any = {
+        $unset: { guestId: '', guestNickname: '', guestElo: '' }
+      };
       if (room.status === 'playing') {
-        // End game if playing?
-        room.status = 'finished';
+        update.$set = { status: 'finished' };
       }
+      await db.collection(COLLECTIONS.ROOMS).updateOne({ roomCode }, update);
+      memoryCache.rooms.delete(roomCode);
     } else {
-      // Remove spectator
-      room.spectators = room.spectators.filter(s => s.id !== playerId);
+      await db.collection(COLLECTIONS.ROOMS).updateOne(
+        { roomCode },
+        { $pull: { spectators: { id: playerId } } } as any
+      );
+      memoryCache.rooms.delete(roomCode);
     }
-    persist();
   },
 
-  deleteRoom(roomCode: string): void {
-    rooms.delete(roomCode);
-    persist();
+  async deleteRoom(roomCode: string): Promise<void> {
+    const db = await getDb();
+    await db.collection(COLLECTIONS.ROOMS).deleteOne({ roomCode });
+    memoryCache.rooms.delete(roomCode);
   },
 
-  resetRoom(roomCode: string): { success: boolean; error?: string } {
-    const room = rooms.get(roomCode);
+  async resetRoom(roomCode: string): Promise<{ success: boolean; error?: string }> {
+    const db = await getDb();
+    const room = await this.getRoom(roomCode);
     if (!room) return { success: false, error: 'Room not found' };
 
-    room.status = 'waiting';
-    room.gameId = undefined;
-    persist();
+    await db.collection(COLLECTIONS.ROOMS).updateOne(
+      { roomCode },
+      { $set: { status: 'waiting' }, $unset: { gameId: '' } }
+    );
+
+    memoryCache.rooms.delete(roomCode);
     return { success: true };
   },
 
-  getRoomCodeByGameId(gameId: string): string | undefined {
-    for (const [code, room] of rooms.entries()) {
-      if (room.gameId === gameId) return code;
-    }
-    return undefined;
+  async getRoomCodeByGameId(gameId: string): Promise<string | undefined> {
+    const db = await getDb();
+    const room = await db.collection<RoomInfo>(COLLECTIONS.ROOMS).findOne({ gameId });
+    return room?.roomCode;
   },
 
+  // ========================
   // Matchmaking
-  addToQueue(playerId: string) {
-    if (!matchQueue.includes(playerId)) {
-      matchQueue.push(playerId);
-    }
+  // ========================
+  // For matchmaking, we'll use a simple collection
+  async addToQueue(playerId: string): Promise<void> {
+    const db = await getDb();
+    await db.collection('matchQueue').updateOne(
+      { playerId },
+      { $set: { playerId, joinedAt: Date.now() } },
+      { upsert: true }
+    );
   },
 
-  removeFromQueue(playerId: string) {
-    const idx = matchQueue.indexOf(playerId);
-    if (idx !== -1) {
-      matchQueue.splice(idx, 1);
-    }
+  async removeFromQueue(playerId: string): Promise<void> {
+    const db = await getDb();
+    await db.collection('matchQueue').deleteOne({ playerId });
   },
 
-  findMatch(playerId: string): string | null {
-    // Try to find someone else in queue
-    // Simple FIFO: just pick the first person who isn't me
-    for (const opponentId of matchQueue) {
-      if (opponentId !== playerId) {
-        return opponentId;
-      }
-    }
-    return null;
+  async findMatch(playerId: string): Promise<string | null> {
+    const db = await getDb();
+    const opponent = await db.collection<{ playerId: string }>('matchQueue')
+      .findOne({ playerId: { $ne: playerId } });
+    return opponent?.playerId || null;
   },
 
-
-  findActiveRoom(playerId: string): RoomInfo | undefined {
-    for (const room of rooms.values()) {
-      // Check host, guest, or spectator
-      if (room.hostId === playerId) return room;
-      if (room.guestId === playerId) return room;
-      // We generally don't auto-redirect spectators unless intended, but for matchmaking we care about players.
-    }
-    return undefined;
+  async findActiveRoom(playerId: string): Promise<RoomInfo | undefined> {
+    const db = await getDb();
+    const room = await db.collection<RoomInfo>(COLLECTIONS.ROOMS).findOne({
+      $or: [
+        { hostId: playerId },
+        { guestId: playerId }
+      ]
+    });
+    return room || undefined;
   },
 
-  cleanupOldRooms() {
+  async cleanupOldRooms(): Promise<void> {
+    const db = await getDb();
     const now = Date.now();
-    for (const [code, room] of rooms.entries()) {
-      // Delete empty waiting/finished rooms older than 1 hour
-      if (room.status !== 'playing' && now - room.createdAt > 3600000) {
-        rooms.delete(code);
-      }
-      // Delete stale playing rooms older than 24 hours
-      if (room.status === 'playing' && now - room.createdAt > 86400000) {
-        rooms.delete(code);
-      }
-    }
-    persist();
+
+    // Delete empty waiting/finished rooms older than 1 hour
+    await db.collection(COLLECTIONS.ROOMS).deleteMany({
+      status: { $ne: 'playing' },
+      createdAt: { $lt: now - 3600000 }
+    });
+
+    // Delete stale playing rooms older than 24 hours
+    await db.collection(COLLECTIONS.ROOMS).deleteMany({
+      status: 'playing',
+      createdAt: { $lt: now - 86400000 }
+    });
+
+    // Clear old games (older than 24 hours)
+    await db.collection(COLLECTIONS.GAMES).deleteMany({
+      updatedAt: { $lt: now - 86400000 }
+    });
   }
 };

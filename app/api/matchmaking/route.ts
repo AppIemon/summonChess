@@ -1,4 +1,3 @@
-
 import { NextResponse } from 'next/server';
 import { GameStore } from '@/lib/store';
 
@@ -9,8 +8,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Player ID required' }, { status: 400 });
     }
 
-    GameStore.registerUser(playerId);
-    GameStore.addToQueue(playerId);
+    await GameStore.registerUser(playerId);
+    await GameStore.addToQueue(playerId);
 
     return NextResponse.json({ success: true, status: 'searching' });
   } catch (e) {
@@ -26,34 +25,45 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Player ID required' }, { status: 400 });
   }
 
-  // Check if matched
-  // In a real system, we'd have a separate worker matching players.
-  // Here, we can try to match on poll.
-
-
   // 1. Check if user is already in a room (matched!)
-  const activeRoom = GameStore.findActiveRoom(playerId);
+  const activeRoom = await GameStore.findActiveRoom(playerId);
   if (activeRoom) {
-    GameStore.removeFromQueue(playerId); // Ensure removed
+    await GameStore.removeFromQueue(playerId);
     return NextResponse.json({ success: true, status: 'matched', roomCode: activeRoom.roomCode });
   }
 
-  // 2. Try to find a match continuously
-  const opponentId = GameStore.findMatch(playerId);
+  // 2. Try to find a match
+  const opponentId = await GameStore.findMatch(playerId);
 
   if (opponentId) {
-    GameStore.removeFromQueue(playerId);
-    GameStore.removeFromQueue(opponentId);
+    await GameStore.removeFromQueue(playerId);
+    await GameStore.removeFromQueue(opponentId);
 
-    const hostUser = GameStore.getUser(playerId)!;
-    const room = GameStore.createRoom(playerId, hostUser.nickname);
+    const hostUser = await GameStore.getUser(playerId);
+    if (!hostUser) {
+      return NextResponse.json({ error: 'User not found' }, { status: 400 });
+    }
 
-    const opponentUser = GameStore.getUser(opponentId)!;
-    // Auto-join opponent
-    GameStore.joinRoom(room.roomCode, opponentId, opponentUser.nickname);
+    const room = await GameStore.createRoom(playerId, hostUser.nickname);
+
+    const opponentUser = await GameStore.getUser(opponentId);
+    if (opponentUser) {
+      await GameStore.joinRoom(room.roomCode, opponentId, opponentUser.nickname);
+    }
 
     return NextResponse.json({ success: true, status: 'matched', roomCode: room.roomCode });
   }
 
   return NextResponse.json({ success: true, status: 'searching' });
+}
+
+export async function DELETE(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const playerId = searchParams.get('playerId');
+
+  if (playerId) {
+    await GameStore.removeFromQueue(playerId);
+  }
+
+  return NextResponse.json({ success: true });
 }

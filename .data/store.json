@@ -29,6 +29,22 @@
         "guestNickname": "Bot (Lv.1)",
         "gameId": "5ZB5SP"
       }
+    ],
+    [
+      "G6557V",
+      {
+        "roomCode": "G6557V",
+        "hostId": "11604e92-d307-4cab-b2b7-3682b1a20abe",
+        "hostNickname": "Player 1160",
+        "hostElo": 400,
+        "spectators": [],
+        "status": "playing",
+        "createdAt": 1770008502868,
+        "guestId": "acf6b1fe-4e2c-4f7b-80f4-0baaadc78754",
+        "guestNickname": "Player acf6",
+        "guestElo": 400,
+        "gameId": "Q2ZRCS"
+      }
     ]
   ],
   "users": [
@@ -41,6 +57,17 @@
         "gamesPlayed": 0,
         "tier": "Beginner",
         "createdAt": 1770008051402
+      }
+    ],
+    [
+      "acf6b1fe-4e2c-4f7b-80f4-0baaadc78754",
+      {
+        "id": "acf6b1fe-4e2c-4f7b-80f4-0baaadc78754",
+        "nickname": "Player acf6",
+        "elo": 400,
+        "gamesPlayed": 0,
+        "tier": "Beginner",
+        "createdAt": 1770008500326
       }
     ]
   ],
@@ -134,12 +161,64 @@
         "whitePlayerId": "11604e92-d307-4cab-b2b7-3682b1a20abe",
         "blackPlayerId": "BOT",
         "whiteTime": 595.034,
-        "blackTime": 600,
-        "lastActionTimestamp": 1770008414787,
+        "blackTime": 588.758,
+        "lastActionTimestamp": 1770008426029,
         "chat": [],
         "isTimeout": false,
         "historyList": [
           "R@d2"
+        ]
+      }
+    ],
+    [
+      "Q2ZRCS",
+      {
+        "fen": "4k3/2r1r3/8/8/8/8/3KR3/8 w - - 2 4",
+        "whiteDeck": [
+          "q",
+          "r",
+          "b",
+          "b",
+          "n",
+          "n",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p"
+        ],
+        "blackDeck": [
+          "q",
+          "b",
+          "b",
+          "n",
+          "n",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p",
+          "p"
+        ],
+        "whitePlayerId": "11604e92-d307-4cab-b2b7-3682b1a20abe",
+        "blackPlayerId": "acf6b1fe-4e2c-4f7b-80f4-0baaadc78754",
+        "whiteTime": 583.41,
+        "blackTime": 586.5319999999999,
+        "lastActionTimestamp": 1770008539917,
+        "chat": [],
+        "isTimeout": false,
+        "historyList": [
+          "R@d2",
+          "R@e7",
+          "Re2",
+          "R@a7",
+          "Kd2",
+          "Rc7"
         ]
       }
     ]

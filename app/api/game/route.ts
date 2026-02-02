@@ -4,6 +4,6 @@ import { GameStore } from '@/lib/store';
 
 export async function POST() {
   const id = uuidv4();
-  GameStore.createGame(id);
+  await GameStore.createGame(id);
   return NextResponse.json({ id });
 }
