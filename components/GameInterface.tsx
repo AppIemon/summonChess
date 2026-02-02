@@ -8,6 +8,7 @@ import { GameState, PieceType, PieceColor, ChatMessage, Action } from '@/lib/gam
 import styles from './GameInterface.module.css';
 import { Chess, Square } from 'chess.js';
 import { SummonChessGame } from '@/lib/game/engine';
+import { useChessEngine } from '@/hooks/useChessEngine';
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -23,7 +24,10 @@ const fetcher = async (url: string) => {
 interface GameInterfaceProps {
   gameId: string;
   isAnalysis?: boolean;
+  isAi?: boolean;
 }
+
+const getStandardFen = (fen: string) => fen.split(' [')[0];
 
 // Timer sub-component for smooth countdown
 function TimerDisplay({ seconds, active }: { seconds: number, active: boolean }) {
@@ -124,26 +128,27 @@ function CheckmateOverlay({ winner, isTimeout }: { winner: PieceColor, isTimeout
   );
 }
 
-export default function GameInterface({ gameId, isAnalysis = false }: GameInterfaceProps) {
+export default function GameInterface({ gameId, isAnalysis = false, isAi = false }: GameInterfaceProps) {
   const { data: serverGameState, mutate, error } = useSWR<GameState>(
-    isAnalysis ? null : `/api/game/${gameId}`,
+    (isAnalysis || isAi) ? null : `/api/game/${gameId}`,
     fetcher,
     { refreshInterval: 1000 }
   );
 
   const [localGame, setLocalGame] = useState<SummonChessGame | null>(null);
   const [localGameState, setLocalGameState] = useState<GameState | null>(null);
+  const { getBestMove, isLoaded: aiLoaded } = useChessEngine();
 
   useEffect(() => {
-    if (isAnalysis) {
+    if (isAnalysis || isAi) {
       const game = new SummonChessGame();
       setLocalGame(game);
       setLocalGameState(game.getState());
       setMyColor('w');
     }
-  }, [isAnalysis]);
+  }, [isAnalysis, isAi]);
 
-  const gameState = isAnalysis ? localGameState : serverGameState;
+  const gameState = (isAnalysis || isAi) ? localGameState : serverGameState;
 
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [selectedHandPiece, setSelectedHandPiece] = useState<PieceType | null>(null);
@@ -176,7 +181,7 @@ export default function GameInterface({ gameId, isAnalysis = false }: GameInterf
   }, [gameState?.history, activeTab]);
 
   const executeAction = async (action: any) => {
-    if (isAnalysis && localGame) {
+    if ((isAnalysis || isAi) && localGame) {
       if (action.type === 'undo_request') {
         localGame.undo();
         setLocalGameState(localGame.getState());
@@ -217,10 +222,10 @@ export default function GameInterface({ gameId, isAnalysis = false }: GameInterf
 
   // Spectator status
   const isSpectator = useMemo(() => {
-    if (isAnalysis) return false;
+    if (isAnalysis || isAi) return false;
     if (!gameState || !playerId) return false;
     return playerId !== gameState.whitePlayerId && playerId !== gameState.blackPlayerId;
-  }, [gameState, playerId, isAnalysis]);
+  }, [gameState, playerId, isAnalysis, isAi]);
 
   // Automatic orientation
   useEffect(() => {
@@ -240,6 +245,36 @@ export default function GameInterface({ gameId, isAnalysis = false }: GameInterf
       setShowVictory(true);
     }
   }, [gameState?.isCheckmate, gameState?.isTimeout, gameState?.winner, showVictory]);
+
+  // Handle AI turn
+  useEffect(() => {
+    if (isAi && aiLoaded && localGame && localGameState && localGameState.turn === 'b' && !localGameState.winner) {
+      const handleAiMove = async () => {
+        const result: { type: 'MOVE' | 'RESIGN'; move?: any } = await getBestMove(localGameState.fen);
+
+        if (result.type === 'RESIGN') {
+          executeAction({ type: 'resign' });
+          return;
+        }
+
+        const bestMove = result.move;
+        if (bestMove && bestMove.to !== -1) {
+          const typeMap: Record<number, PieceType> = { 1: 'p', 2: 'n', 3: 'b', 4: 'r', 5: 'q', 6: 'k' };
+          const toSquare = `${'abcdefgh'[bestMove.to % 8]}${Math.floor(bestMove.to / 8) + 1}`;
+
+          if (bestMove.type === 'SUMMON') {
+            executeAction({ type: 'summon', piece: typeMap[bestMove.piece], square: toSquare });
+          } else {
+            const fromSquare = `${'abcdefgh'[bestMove.from % 8]}${Math.floor(bestMove.from / 8) + 1}`;
+            executeAction({ type: 'move', from: fromSquare, to: toSquare });
+          }
+        }
+      };
+
+      const timer = setTimeout(handleAiMove, 200);
+      return () => clearTimeout(timer);
+    }
+  }, [isAi, aiLoaded, localGameState?.turn]);
 
   // Handle Premove execution
   useEffect(() => {
@@ -326,7 +361,7 @@ export default function GameInterface({ gameId, isAnalysis = false }: GameInterf
       }
 
       import('chess.js').then(({ Chess }) => {
-        const chess = new Chess(gameState.fen);
+        const chess = new Chess(getStandardFen(gameState.fen));
         const piece = chess.get(square as any);
         if (piece && piece.color === gameState.turn) {
           setSelectedSquare(square);
@@ -354,7 +389,7 @@ export default function GameInterface({ gameId, isAnalysis = false }: GameInterf
         setValidTargetSquares([]);
       } else {
         import('chess.js').then(({ Chess }) => {
-          const chess = new Chess(gameState.fen);
+          const chess = new Chess(getStandardFen(gameState.fen));
           const piece = chess.get(square as any);
           if (piece && piece.color === myColor) {
             setSelectedSquare(square);
@@ -382,7 +417,7 @@ export default function GameInterface({ gameId, isAnalysis = false }: GameInterf
         import('chess.js'),
         import('@/lib/game/engine')
       ]).then(([{ Chess }, { isReachableByOwnPiece }]) => {
-        const chess = new Chess(gameState.fen);
+        const chess = new Chess(getStandardFen(gameState.fen));
         const valid: string[] = [];
         for (let r = 1; r <= 8; r++) {
           for (let c = 0; c < 8; c++) {
@@ -707,7 +742,8 @@ export default function GameInterface({ gameId, isAnalysis = false }: GameInterf
           />
           <button onClick={() => {
             if (gameState) {
-              navigator.clipboard.writeText(gameState.fen);
+              const fullFen = SummonChessGame.toExtendedFen(getStandardFen(gameState.fen), gameState.whiteDeck, gameState.blackDeck);
+              navigator.clipboard.writeText(fullFen);
               alert('현재 FEN이 복사되었습니다.');
             }
           }}>현재 FEN 복사</button>

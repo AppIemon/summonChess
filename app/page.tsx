@@ -202,6 +202,14 @@ export default function Home() {
 
               <button
                 className={styles.secondaryButton}
+                onClick={() => router.push('/play/ai')}
+                disabled={loading || isSearching}
+              >
+                🤖 컴퓨터와 대결
+              </button>
+
+              <button
+                className={styles.secondaryButton}
                 onClick={() => router.push('/analysis')}
                 disabled={loading || isSearching}
               >

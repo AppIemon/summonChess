@@ -22,10 +22,21 @@ export class SummonChessGame {
   private stateStack: string[] = []; // Stack of serialized states for undo
 
   constructor(fen?: string, whiteDeck?: PieceType[], blackDeck?: PieceType[], whitePlayerId?: string, blackPlayerId?: string, historyList?: string[], roomCode?: string) {
-    this.chess = new Chess(fen || '4k3/8/8/8/8/8/8/4K3 w - - 0 1');
+    let standardFen = fen;
+    let extractedWhiteDeck = whiteDeck;
+    let extractedBlackDeck = blackDeck;
+
+    if (fen && fen.includes('[')) {
+      const parsed = SummonChessGame.parseExtendedFen(fen);
+      standardFen = parsed.fen;
+      extractedWhiteDeck = parsed.whiteDeck || whiteDeck;
+      extractedBlackDeck = parsed.blackDeck || blackDeck;
+    }
+
+    this.chess = new Chess(standardFen || '4k3/8/8/8/8/8/8/4K3 w - - 0 1');
     const defaultDeck: PieceType[] = ['q', 'r', 'r', 'b', 'b', 'n', 'n', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'];
-    this.whiteDeck = whiteDeck ? [...whiteDeck] : [...defaultDeck];
-    this.blackDeck = blackDeck ? [...blackDeck] : [...defaultDeck];
+    this.whiteDeck = extractedWhiteDeck ? [...extractedWhiteDeck] : [...defaultDeck];
+    this.blackDeck = extractedBlackDeck ? [...extractedBlackDeck] : [...defaultDeck];
     this.whitePlayerId = whitePlayerId;
     this.blackPlayerId = blackPlayerId;
     this.lastActionTimestamp = Date.now();
@@ -56,7 +67,7 @@ export class SummonChessGame {
     }
 
     return {
-      fen: this.chess.fen(),
+      fen: SummonChessGame.toExtendedFen(this.chess.fen(), this.whiteDeck, this.blackDeck),
       turn: this.chess.turn(),
       whiteDeck: [...this.whiteDeck],
       blackDeck: [...this.blackDeck],
@@ -353,6 +364,24 @@ export class SummonChessGame {
     if (data.undoRequest !== undefined) game.undoRequest = data.undoRequest;
     if (data.lastMove !== undefined) game.lastMove = data.lastMove;
     return game;
+  }
+
+  static toExtendedFen(fen: string, whiteDeck: PieceType[], blackDeck: PieceType[]): string {
+    const whiteStr = whiteDeck.map(p => p.toUpperCase()).join('');
+    const blackStr = blackDeck.map(p => p.toLowerCase()).join('');
+    return `${fen} [${whiteStr}][${blackStr}]`;
+  }
+
+  static parseExtendedFen(extendedFen: string): { fen: string; whiteDeck: PieceType[] | null; blackDeck: PieceType[] | null } {
+    const match = extendedFen.match(/^(.*) \[(.*)\]\[(.*)\]$/);
+    if (match) {
+      return {
+        fen: match[1],
+        whiteDeck: match[2].toUpperCase().split('').map(p => p.toLowerCase()) as PieceType[],
+        blackDeck: match[3].toLowerCase().split('').map(p => p.toLowerCase()) as PieceType[]
+      };
+    }
+    return { fen: extendedFen, whiteDeck: null, blackDeck: null };
   }
 }
 
