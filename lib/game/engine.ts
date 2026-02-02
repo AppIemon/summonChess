@@ -140,8 +140,8 @@ export class SummonChessGame {
     }
 
     // 3. Regular Actions (Timer update + State Stack push)
-    // Capture state BEFORE action for undo
-    this.stateStack.push(JSON.stringify(this.serialize()));
+    // Capture state BEFORE action for undo, EXCLUDING the stack to prevent exponential growth
+    this.stateStack.push(JSON.stringify(this.serialize(false)));
     if (this.stateStack.length > 50) this.stateStack.shift();
 
     const now = Date.now();
@@ -314,15 +314,19 @@ export class SummonChessGame {
     return false;
   }
 
-  public serialize(): any {
-    return {
+  public serialize(includeStack: boolean = true): any {
+    const data: any = {
       fen: this.chess.fen(), whiteDeck: this.whiteDeck, blackDeck: this.blackDeck,
       whitePlayerId: this.whitePlayerId, blackPlayerId: this.blackPlayerId,
       resignedBy: this.resignedBy, whiteTime: this.whiteTime, blackTime: this.blackTime,
       lastActionTimestamp: this.lastActionTimestamp, chat: this.chat, isTimeout: this.isTimeout,
-      historyList: this.historyList, stateStack: this.stateStack, roomCode: this.roomCode,
+      historyList: this.historyList, roomCode: this.roomCode,
       undoRequest: this.undoRequest, lastMove: this.lastMove
     };
+    if (includeStack) {
+      data.stateStack = this.stateStack;
+    }
+    return data;
   }
 
   static deserialize(data: any): SummonChessGame {
@@ -333,7 +337,19 @@ export class SummonChessGame {
     if (data.lastActionTimestamp !== undefined) game.lastActionTimestamp = data.lastActionTimestamp;
     if (data.chat !== undefined) game.chat = data.chat;
     if (data.isTimeout !== undefined) game.isTimeout = data.isTimeout;
-    if (data.stateStack !== undefined) game.stateStack = data.stateStack;
+
+    if (data.stateStack !== undefined && Array.isArray(data.stateStack)) {
+      // Safety check: if the stack is somehow bloated (total size too large), truncate it
+      // A typical state without nested stack is < 10KB. If any element is > 50KB, it's likely bloated.
+      const isBloated = data.stateStack.some((s: string) => s.length > 50000);
+      if (isBloated) {
+        console.warn('Bloated state stack detected, clearing to prevent hang.');
+        game.stateStack = [];
+      } else {
+        game.stateStack = data.stateStack;
+      }
+    }
+
     if (data.undoRequest !== undefined) game.undoRequest = data.undoRequest;
     if (data.lastMove !== undefined) game.lastMove = data.lastMove;
     return game;

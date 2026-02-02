@@ -187,11 +187,13 @@ export const GameStore = {
     return room;
   },
 
-  async getRoom(roomCode: string): Promise<RoomInfo | undefined> {
+  async getRoom(roomCode: string, bypassCache = false): Promise<RoomInfo | undefined> {
     // Check cache
-    const cached = memoryCache.rooms.get(roomCode);
-    if (cached && Date.now() - cached.cachedAt < CACHE_TTL) {
-      return cached.room;
+    if (!bypassCache) {
+      const cached = memoryCache.rooms.get(roomCode);
+      if (cached && Date.now() - cached.cachedAt < CACHE_TTL) {
+        return cached.room;
+      }
     }
 
     const db = await getDb();
@@ -211,7 +213,9 @@ export const GameStore = {
       }
     }
 
-    memoryCache.rooms.set(roomCode, { room, cachedAt: Date.now() });
+    if (!bypassCache) {
+      memoryCache.rooms.set(roomCode, { room, cachedAt: Date.now() });
+    }
     return room;
   },
 
@@ -278,10 +282,16 @@ export const GameStore = {
 
   async startGame(roomCode: string): Promise<{ success: boolean; error?: string; gameId?: string }> {
     const db = await getDb();
-    const room = await this.getRoom(roomCode);
+    // Bypass cache to ensure we see the guest
+    const room = await this.getRoom(roomCode, true);
     if (!room) return { success: false, error: 'Room not found' };
 
-    if (!room.guestId) return { success: false, error: 'Not enough players' };
+    console.log(`Starting game in room ${roomCode}. Host: ${room.hostId}, Guest: ${room.guestId}`);
+
+    if (!room.guestId) {
+      console.warn(`Cannot start game in room ${roomCode}: No guestId found.`, room);
+      return { success: false, error: '상대 플레이어가 없습니다.' };
+    }
 
     const gameId = generateRoomCode();
     await this.createGame(gameId, room.hostId, room.guestId);
@@ -374,10 +384,12 @@ export const GameStore = {
 
   async findActiveRoom(playerId: string): Promise<RoomInfo | undefined> {
     const db = await getDb();
+    const now = Date.now();
+    // Only return rooms created in the last 24 hours
     const room = await db.collection<RoomInfo>(COLLECTIONS.ROOMS).findOne({
-      $or: [
-        { hostId: playerId },
-        { guestId: playerId }
+      $and: [
+        { $or: [{ hostId: playerId }, { guestId: playerId }] },
+        { createdAt: { $gt: now - 86400000 } }
       ]
     });
     return room || undefined;
