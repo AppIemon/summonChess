@@ -544,6 +544,17 @@ self.onmessage = (e) => {
   if (maxVal < -MATE_SCORE + 100) {
     self.postMessage({ type: 'RESIGN' });
   } else {
-    self.postMessage({ type: 'MOVE', move: bestM });
+    // Convert score to standard "White perspective" score
+    // maxVal is always relative to the side to move (gs.turn)
+    // If turn is White, positive maxVal means White is winning.
+    // If turn is Black, positive maxVal means Black is winning.
+    // We want positive = White advantage, negative = Black advantage.
+
+    // However, traditionally engines return score relative to side to move. 
+    // But UI usually wants relative to White or "Absolute Advantage".
+    // Let's return standard "White is positive" score.
+    const standardScore = (gs.turn === 1 /* WHITE */) ? maxVal : -maxVal;
+
+    self.postMessage({ type: 'MOVE', move: bestM, evaluation: standardScore });
   }
 };

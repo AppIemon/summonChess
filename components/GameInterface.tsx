@@ -170,6 +170,33 @@ function CheckmateOverlay({
   );
 }
 
+// Evaluation Bar Component
+function EvalBar({ score }: { score: number | null }) {
+  const winChance = score === null ? 0.5 : 1 / (1 + Math.pow(10, -score / 400));
+  const whiteHeight = `${winChance * 100}%`;
+
+  let scoreText = '';
+  if (score !== null) {
+    if (Math.abs(score) > 10000) {
+      scoreText = score > 0 ? '+M' : '-M';
+    } else {
+      scoreText = (score / 100).toFixed(1);
+      if (score > 0) scoreText = '+' + scoreText;
+    }
+  }
+
+  return (
+    <div className={styles.evalBarContainer}>
+      <div className={styles.evalBarBlack}>
+        {score !== null && score < 0 && <span className={styles.scoreTextTop}>{scoreText}</span>}
+      </div>
+      <div className={styles.evalBarWhite} style={{ height: whiteHeight }}>
+        {score !== null && score >= 0 && <span className={styles.scoreTextBottom}>{scoreText}</span>}
+      </div>
+    </div>
+  );
+}
+
 export default function GameInterface({ gameId, isAnalysis = false, isAi = false }: GameInterfaceProps) {
   const { data: serverGameState, mutate, error } = useSWR<GameState>(
     (isAnalysis || isAi) ? null : `/api/game/${gameId}`,
@@ -202,6 +229,10 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   const [myColor, setMyColor] = useState<PieceColor>('w');
   const [showVictory, setShowVictory] = useState(false);
   const [victoryShown, setVictoryShown] = useState(false);
+
+  // Evaluation Bar State
+  const [showEvalBar, setShowEvalBar] = useState(false);
+  const [evalScore, setEvalScore] = useState<number | null>(null);
 
   // Premoves state
   const [premove, setPremove] = useState<Action | null>(null);
@@ -321,7 +352,11 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   useEffect(() => {
     if (isAi && aiLoaded && localGame && localGameState && localGameState.turn !== myColor && !localGameState.winner) {
       const handleAiMove = async () => {
-        const result: { type: 'MOVE' | 'RESIGN'; move?: any } = await getBestMove(localGameState.fen);
+        const result: { type: 'MOVE' | 'RESIGN'; move?: any; evaluation?: number } = await getBestMove(localGameState.fen);
+
+        if (result.evaluation !== undefined) {
+          setEvalScore(result.evaluation);
+        }
 
         if (result.type === 'RESIGN') {
           executeAction({ type: 'resign' });
@@ -579,6 +614,21 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
     await executeAction({ type: 'undo_response', accept });
   };
 
+  const handleCopyNotation = () => {
+    if (!gameState?.history) return;
+
+    let notation = '';
+    for (let i = 0; i < gameState.history.length; i += 2) {
+      const moveNum = Math.floor(i / 2) + 1;
+      const whiteMove = gameState.history[i];
+      const blackMove = gameState.history[i + 1] || '';
+      notation += `${moveNum}. ${whiteMove} ${blackMove}\n`;
+    }
+
+    navigator.clipboard.writeText(notation.trim());
+    alert('기보가 복사되었습니다!');
+  };
+
   return (
     <div className={styles.container}>
       {showVictory && finalResult && (
@@ -662,16 +712,19 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
             />
           </div>
 
-          <Board
-            fen={gameState.fen}
-            onSquareClick={handleSquareClick}
-            selectedSquare={selectedSquare}
-            validTargetSquares={validTargetSquares}
-            orientation={myColor}
-            lastMove={gameState.lastMove}
-            isCheckmate={gameState.isCheckmate}
-            premove={premove as any}
-          />
+          <div className={styles.boardWrapper}>
+            <Board
+              fen={gameState.fen}
+              onSquareClick={handleSquareClick}
+              selectedSquare={selectedSquare}
+              validTargetSquares={validTargetSquares}
+              orientation={myColor}
+              lastMove={gameState.lastMove}
+              isCheckmate={gameState.isCheckmate}
+              premove={premove as any}
+            />
+            {isAi && showEvalBar && <EvalBar score={evalScore} />}
+          </div>
 
           <div className={styles.timerBar}>
             <TimerDisplay
@@ -783,10 +836,19 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       </div>
 
       <div className={styles.controls}>
+        {isAi && (
+          <button
+            className={showEvalBar ? styles.activeControl : ''}
+            onClick={() => setShowEvalBar(!showEvalBar)}
+          >
+            📊 평가 막대 {showEvalBar ? 'ON' : 'OFF'}
+          </button>
+        )}
         <button onClick={() => setMyColor(myColor === 'w' ? 'b' : 'w')}>🔄 보드 뒤집기</button>
         {!isAnalysis && <button onClick={handleUndoRequest} disabled={!!gameState.undoRequest || gameState.history.length === 0}>↩️ 무르기</button>}
         {isAnalysis && <button onClick={handleUndoRequest} disabled={gameState.history.length === 0}>↩️ 무르기</button>}
         {!isAnalysis && <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/room/${gameId}`); alert('링크가 복사되었습니다!'); }}>📋 링크 공유</button>}
+        <button onClick={handleCopyNotation}>📝 기보 복사</button>
         <button onClick={() => alert('🎮 조작 가이드\n\n• 왼쪽: 소환 가능한 기물 목록 (클릭 후 보드에 소환)\n• 중앙: 체스 보드 및 타이머\n• 오른쪽: 실시간 채팅\n• 프리무브: 상대 차례에 예약 가능')}>❓ 가이드</button>
         {!isAnalysis && !gameState.winner && !isSpectator && <button className={styles.resignButton} onClick={handleResign}>🏳️ 기권</button>}
         {(isAnalysis || gameState.winner || isSpectator) && (

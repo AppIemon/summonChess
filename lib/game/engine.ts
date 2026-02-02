@@ -209,7 +209,14 @@ export class SummonChessGame {
   public undo(): { success: boolean, error?: string } {
     if (this.stateStack.length === 0) return { success: false, error: "No history to undo" };
 
-    const previousStateJson = this.stateStack.pop();
+    // Undo two steps (one full turn) if possible
+    let stepsToUndo = this.stateStack.length >= 2 ? 2 : 1;
+
+    let previousStateJson: string | undefined;
+    for (let i = 0; i < stepsToUndo; i++) {
+      previousStateJson = this.stateStack.pop();
+    }
+
     if (!previousStateJson) return { success: false, error: "Undo failed" };
 
     const data = JSON.parse(previousStateJson);
@@ -225,7 +232,7 @@ export class SummonChessGame {
     this.chat = [...data.chat];
     this.isTimeout = data.isTimeout;
     this.historyList = [...data.historyList];
-    this.lastMove = null; // We can improve this if we store lastMove in serialize
+    this.lastMove = data.lastMove || null;
 
     return { success: true };
   }

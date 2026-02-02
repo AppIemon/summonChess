@@ -18,7 +18,7 @@ export const useChessEngine = () => {
     }
   }, []);
 
-  const getBestMove = (fen: string): Promise<{ type: 'MOVE' | 'RESIGN'; move?: any }> => {
+  const getBestMove = (fen: string): Promise<{ type: 'MOVE' | 'RESIGN'; move?: any; evaluation?: number }> => {
     return new Promise((resolve) => {
       if (!workerRef.current) {
         resolve({ type: 'MOVE', move: null });

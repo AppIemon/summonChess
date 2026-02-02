@@ -110,6 +110,81 @@
   gap: 20px;
 }
 
+.boardWrapper {
+  display: flex;
+  align-items: stretch;
+  /* Attempt to match height if possible, but board often has aspect ratio */
+  justify-content: center;
+  gap: 15px;
+  position: relative;
+}
+
+.evalBarContainer {
+  width: 24px;
+  min-height: 300px;
+  /* Fallback */
+  height: auto;
+  /* To match board if stretch works, otherwise we might need fixed */
+  background: #404040;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  align-self: stretch;
+  /* Match board height */
+}
+
+.evalBarBlack {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #404040;
+  z-index: 1;
+}
+
+.evalBarWhite {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: #ffffff;
+  z-index: 2;
+  transition: height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.scoreTextTop {
+  position: absolute;
+  top: 5px;
+  width: 100%;
+  text-align: center;
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: #fff;
+  z-index: 3;
+}
+
+.scoreTextBottom {
+  position: absolute;
+  bottom: 5px;
+  width: 100%;
+  text-align: center;
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: #333;
+  z-index: 3;
+}
+
+.activeControl {
+  background: #667eea !important;
+  color: #fff !important;
+  border-color: #5a6fd1 !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1) !important;
+}
+
 .timerBar {
   width: 100%;
   max-width: 700px;
