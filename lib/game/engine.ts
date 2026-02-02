@@ -93,6 +93,7 @@ export class SummonChessGame {
     const turn = this.chess.turn();
     const effectivePlayerId = playerId || action.playerId;
 
+    // 1. Chat (Meta-action, works even if game over)
     if (action.type === 'chat') {
       this.chat.push({
         id: Math.random().toString(36).substr(2, 9),
@@ -107,9 +108,41 @@ export class SummonChessGame {
 
     if (this.checkGameOver()) return { success: false, error: "Game Over" };
 
+    // 2. Undo Meta-actions (No timer update, no state stack push)
+    if (action.type === 'undo_request') {
+      if (this.undoRequest?.status === 'pending') return { success: false, error: "Undo request already pending" };
+
+      let requesterColor: PieceColor = turn;
+      if (effectivePlayerId === this.whitePlayerId) requesterColor = 'w';
+      else if (effectivePlayerId === this.blackPlayerId) requesterColor = 'b';
+
+      this.undoRequest = { from: requesterColor, status: 'pending' };
+      return { success: true };
+    }
+
+    if (action.type === 'undo_response') {
+      if (!this.undoRequest || this.undoRequest.status !== 'pending') return { success: false, error: "No pending undo request" };
+
+      let respondentColor: PieceColor = turn === 'w' ? 'b' : 'w';
+      if (effectivePlayerId === this.whitePlayerId) respondentColor = 'w';
+      else if (effectivePlayerId === this.blackPlayerId) respondentColor = 'b';
+
+      if (this.undoRequest.from === respondentColor) return { success: false, error: "Cannot respond to your own request" };
+
+      if (action.accept) {
+        this.undo();
+        this.undoRequest = null;
+      } else {
+        this.undoRequest.status = 'declined';
+        setTimeout(() => { if (this.undoRequest?.status === 'declined') this.undoRequest = null; }, 5000);
+      }
+      return { success: true };
+    }
+
+    // 3. Regular Actions (Timer update + State Stack push)
     // Capture state BEFORE action for undo
     this.stateStack.push(JSON.stringify(this.serialize()));
-    if (this.stateStack.length > 50) this.stateStack.shift(); // Limit history
+    if (this.stateStack.length > 50) this.stateStack.shift();
 
     const now = Date.now();
     const elapsed = (now - this.lastActionTimestamp) / 1000;
@@ -157,25 +190,8 @@ export class SummonChessGame {
       else if (effectivePlayerId === this.blackPlayerId) this.resignedBy = 'b';
       else this.resignedBy = turn;
       return { success: true };
-    } else if (action.type === 'undo_request') {
-      if (this.undoRequest?.status === 'pending') return { success: false, error: "Undo request already pending" };
-      this.undoRequest = { from: turn, status: 'pending' };
-      return { success: true };
-    } else if (action.type === 'undo_response') {
-      if (!this.undoRequest || this.undoRequest.status !== 'pending') return { success: false, error: "No pending undo request" };
-      if (this.undoRequest.from === turn) return { success: false, error: "Cannot respond to your own request" };
-
-      if (action.accept) {
-        this.undo();
-        this.undoRequest = null;
-      } else {
-        this.undoRequest.status = 'declined';
-        // Auto-clear declined status after some time or next move?
-        // For now, let's just clear it.
-        setTimeout(() => { if (this.undoRequest?.status === 'declined') this.undoRequest = null; }, 5000);
-      }
-      return { success: true };
     }
+
     return { success: false, error: "Invalid action" };
   }
 
