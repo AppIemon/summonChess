@@ -42,6 +42,7 @@ interface SerializedGame {
 // In-memory cache for hot data (optional performance optimization)
 const memoryCache = {
   games: new Map<string, { game: SummonChessGame; cachedAt: number }>(),
+  gameRequests: new Map<string, Promise<SummonChessGame | undefined>>(),
   rooms: new Map<string, { room: RoomInfo; cachedAt: number }>(),
 };
 
@@ -126,18 +127,33 @@ export const GameStore = {
       return cached.game;
     }
 
-    const db = await getDb();
-    const doc = await db.collection<SerializedGame>(COLLECTIONS.GAMES).findOne({ gameId: id });
-    if (!doc) return undefined;
+    // Check if there's an in-flight request
+    const inFlight = memoryCache.gameRequests.get(id);
+    if (inFlight) return inFlight;
 
-    try {
-      const game = SummonChessGame.deserialize(doc.data);
-      memoryCache.games.set(id, { game, cachedAt: Date.now() });
-      return game;
-    } catch (e) {
-      console.error(`Failed to deserialize game ${id}:`, e);
-      return undefined;
-    }
+    // Fetch from DB
+    const request = (async () => {
+      const db = await getDb();
+      const doc = await db.collection<SerializedGame>(COLLECTIONS.GAMES).findOne({ gameId: id });
+      if (!doc) {
+        memoryCache.gameRequests.delete(id);
+        return undefined;
+      }
+
+      try {
+        const game = SummonChessGame.deserialize(doc.data);
+        memoryCache.games.set(id, { game, cachedAt: Date.now() });
+        memoryCache.gameRequests.delete(id);
+        return game;
+      } catch (e) {
+        console.error(`Failed to deserialize game ${id}:`, e);
+        memoryCache.gameRequests.delete(id);
+        return undefined;
+      }
+    })();
+
+    memoryCache.gameRequests.set(id, request);
+    return request;
   },
 
   async saveGame(id: string, game: SummonChessGame): Promise<void> {

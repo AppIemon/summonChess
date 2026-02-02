@@ -101,8 +101,46 @@ function Confetti({ count = 50 }: { count?: number }) {
 }
 
 // Checkmate Victory Overlay
-function CheckmateOverlay({ winner, isTimeout }: { winner: PieceColor, isTimeout?: boolean }) {
+function CheckmateOverlay({
+  winner,
+  isTimeout,
+  isStalemate,
+  isCheckmate,
+  onAutoClose
+}: {
+  winner: PieceColor | null,
+  isTimeout?: boolean,
+  isStalemate?: boolean,
+  isCheckmate?: boolean,
+  onAutoClose: () => void
+}) {
   const isWhiteWinner = winner === 'w';
+  const [countdown, setCountdown] = useState(5);
+
+  useEffect(() => {
+    if (countdown <= 0) {
+      onAutoClose();
+      return;
+    }
+    const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [countdown, onAutoClose]);
+
+  const getReason = () => {
+    if (isTimeout) return '시간이 모두 소진되었습니다.';
+    if (isCheckmate) return '킹이 공격받고 있으며 탈출할 수 없습니다.';
+    if (isStalemate) return '더 이상 움직일 수 있는 수가 없습니다. (스테일메이트)';
+    if (isStalemate || winner === null) return '무승부입니다.';
+    return '상대가 기권했습니다.';
+  };
+
+  const getTitle = () => {
+    if (isStalemate) return '무승부';
+    if (isTimeout) return '시간 종료';
+    if (isCheckmate) return '체크메이트!';
+    if (winner === null) return '무승부';
+    return '경기 종료';
+  };
 
   return (
     <>
@@ -118,10 +156,14 @@ function CheckmateOverlay({ winner, isTimeout }: { winner: PieceColor, isTimeout
 
         <div className={styles.victoryContent}>
           <div className={styles.crown}>👑</div>
-          <div className={styles.victoryText}>{isTimeout ? '시간승!' : '체크메이트!'}</div>
-          <div className={`${styles.winnerText} ${isWhiteWinner ? styles.winnerWhite : styles.winnerBlack}`}>
-            {isWhiteWinner ? '백 승리' : '흑 승리'}
+          <div className={styles.victoryText}>
+            {getTitle()}
           </div>
+          <div className={`${styles.winnerText} ${winner === 'w' ? styles.winnerWhite : (winner === 'b' ? styles.winnerBlack : '')}`}>
+            {isStalemate || winner === null ? '무승부' : (winner === 'w' ? '백 승리' : '흑 승리')}
+          </div>
+          <div className={styles.reasonText}>{getReason()}</div>
+          <div className={styles.autoCloseText}>{countdown}초 후 보드로 돌아갑니다...</div>
         </div>
       </div>
     </>
@@ -163,6 +205,13 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [playerId, setPlayerId] = useState<string | null>(null);
+  const [finalResult, setFinalResult] = useState<{
+    winner: PieceColor | null;
+    isTimeout?: boolean;
+    isStalemate?: boolean;
+    isCheckmate?: boolean;
+    isDraw?: boolean;
+  } | null>(null);
   const [lastChatCount, setLastChatCount] = useState(0);
 
   // Tab state
@@ -240,11 +289,18 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
 
   // Trigger victory animation
   useEffect(() => {
-    const isGameOver = gameState?.isCheckmate || gameState?.isTimeout || (gameState?.winner && !gameState?.isCheckmate);
-    if (isGameOver && gameState?.winner && !showVictory) {
+    const isGameOver = gameState?.isCheckmate || gameState?.isTimeout || gameState?.isStalemate || gameState?.isDraw || (gameState?.winner);
+    if (isGameOver && !showVictory) {
+      setFinalResult({
+        winner: gameState.winner,
+        isTimeout: gameState.isTimeout,
+        isStalemate: gameState.isStalemate,
+        isCheckmate: gameState.isCheckmate,
+        isDraw: gameState.isDraw
+      });
       setShowVictory(true);
     }
-  }, [gameState?.isCheckmate, gameState?.isTimeout, gameState?.winner, showVictory]);
+  }, [gameState, showVictory]);
 
   // Handle AI turn
   useEffect(() => {
@@ -331,7 +387,8 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   if (!gameState) return null; // Should be handled by isFetchingInitial above, but for TS completeness
 
   const handleSquareClick = async (square: string) => {
-    if (gameState.winner || isSpectator) return;
+    const isGameOver = gameState.winner || gameState.isStalemate || gameState.isDraw || gameState.isTimeout;
+    if (isGameOver || isSpectator) return;
 
     if (isAnalysis || gameState.turn === myColor) {
       if (selectedHandPiece) {
@@ -398,7 +455,8 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   };
 
   const handleHandSelect = (piece: PieceType | null) => {
-    if (gameState.winner || isSpectator) return;
+    const isGameOver = gameState.winner || gameState.isStalemate || gameState.isDraw || gameState.isTimeout;
+    if (isGameOver || isSpectator) return;
 
     if (!piece) {
       setSelectedHandPiece(null);
@@ -508,8 +566,14 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
 
   return (
     <div className={styles.container}>
-      {showVictory && gameState.winner && (
-        <CheckmateOverlay winner={gameState.winner} isTimeout={gameState.isTimeout} />
+      {showVictory && finalResult && (
+        <CheckmateOverlay
+          winner={finalResult.winner}
+          isTimeout={finalResult.isTimeout}
+          isStalemate={finalResult.isStalemate}
+          isCheckmate={finalResult.isCheckmate}
+          onAutoClose={() => setShowVictory(false)}
+        />
       )}
 
       {gameState.undoRequest && gameState.undoRequest.status === 'pending' && (
