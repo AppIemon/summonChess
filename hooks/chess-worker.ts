@@ -430,14 +430,18 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number):
 self.onmessage = (e) => {
   const { fen } = e.data;
   initZobrist();
+  console.log('AI starting search for FEN:', fen);
+  const startTime = Date.now();
+
   const gs = new AiGameState();
   gs.loadFen(fen);
 
-  const depth = 5;
+  const depth = 3; // Reduced depth for responsiveness
   let alpha = -INF;
   let beta = INF;
 
   const moves = gs.generateMoves();
+  console.log(`AI found ${moves.length} legal moves`);
   if (moves.length === 0) {
     self.postMessage({ type: 'MOVE', move: null });
     return;
@@ -461,6 +465,8 @@ self.onmessage = (e) => {
     }
     alpha = Math.max(alpha, val);
   }
+
+  console.log(`AI search finished. Best move: ${bestM.type} ${bestM.from}->${bestM.to}. Score: ${maxVal}. Time: ${Date.now() - startTime}ms`);
 
   // Resignation check
   if (maxVal < -MATE_SCORE + 100) {

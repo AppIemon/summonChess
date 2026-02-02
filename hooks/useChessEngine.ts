@@ -6,7 +6,7 @@ export const useChessEngine = () => {
 
   useEffect(() => {
     try {
-      const worker = new Worker(new URL('../public/wasm/chess-worker.ts', import.meta.url));
+      const worker = new Worker(new URL('./chess-worker.ts', import.meta.url));
       workerRef.current = worker;
       setIsLoaded(true);
 
