@@ -5,6 +5,8 @@ export interface IBestMove extends Document {
   move: any;
   score: number;
   depth: number;
+  winCount: number;
+  lossCount: number;
   updatedAt: Date;
 }
 
@@ -13,6 +15,8 @@ const BestMoveSchema: Schema = new Schema({
   move: { type: Schema.Types.Mixed, required: true },
   score: { type: Number, required: true },
   depth: { type: Number, required: true },
+  winCount: { type: Number, default: 0 },
+  lossCount: { type: Number, default: 0 },
   updatedAt: { type: Date, default: Date.now },
 });
 

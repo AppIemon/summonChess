@@ -314,6 +314,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   // Tab state
   const [activeTab, setActiveTab] = useState<'chat' | 'history' | 'hands'>('chat');
   const historyEndRef = useRef<HTMLDivElement>(null);
+  const gameHistoryRef = useRef<{ fen: string, move: any, color: PieceColor }[]>([]);
 
   const [username, setUsername] = useState<string>('Unknown');
 
@@ -340,7 +341,16 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
     }
   }, [gameState?.history, activeTab]);
 
-  const executeAction = async (action: any) => {
+  const executeAction = async (action: any, aiMoveObj?: any) => {
+    // Record history for AI learning (only for moves and summons)
+    if (gameState && (action.type === 'move' || action.type === 'summon')) {
+      gameHistoryRef.current.push({
+        fen: gameState.fen,
+        move: aiMoveObj || action,
+        color: gameState.turn
+      });
+    }
+
     if ((isAnalysis || isAi) && localGame) {
       if (action.type === 'undo_request') {
         localGame.undo();
@@ -398,7 +408,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
     }
   }, [gameState?.whitePlayerId, gameState?.blackPlayerId, playerId, isSpectator]);
 
-  // Trigger victory animation
+  // Trigger victory animation and report result
   useEffect(() => {
     const isGameOver = !!(gameState?.isCheckmate || gameState?.isTimeout || gameState?.isStalemate || gameState?.isDraw || gameState?.winner);
 
@@ -413,8 +423,39 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         });
         setShowVictory(true);
         setVictoryShown(true);
+
+        // Report result for AI learning
+        if ((isAi || isAiVsAi) && gameHistoryRef.current.length > 0) {
+          fetch('/api/ai/report-game-result', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              history: gameHistoryRef.current,
+              winner: gameState.winner
+            })
+          }).catch(err => console.error('Failed to report game result:', err));
+        }
+
+        // Auto-restart for AI vs AI mode
+        if (isAiVsAi) {
+          const restartTimer = setTimeout(() => {
+            const game = new SummonChessGame();
+            setLocalGame(game);
+            setLocalGameState(game.getState());
+            gameHistoryRef.current = [];
+            setShowVictory(false);
+            setVictoryShown(false);
+            setEvalScore(null);
+            setEvalVariations([]);
+          }, 3000); // 3 seconds delay to see the result
+          return () => clearTimeout(restartTimer);
+        }
       }
     } else {
+      // Reset history on new game
+      if (gameState && gameState.history && gameState.history.length === 0) {
+        gameHistoryRef.current = [];
+      }
       // Reset shown state when game is not over (e.g. after a reset)
       if (victoryShown) {
         setVictoryShown(false);
@@ -448,18 +489,18 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
           const toSquare = `${'abcdefgh'[bestMove.to % 8]}${Math.floor(bestMove.to / 8) + 1}`;
 
           if (bestMove.type === 'SUMMON') {
-            executeAction({ type: 'summon', piece: typeMap[bestMove.piece], square: toSquare });
+            executeAction({ type: 'summon', piece: typeMap[bestMove.piece], square: toSquare }, bestMove);
           } else {
             const fromSquare = `${'abcdefgh'[bestMove.from % 8]}${Math.floor(bestMove.from / 8) + 1}`;
-            executeAction({ type: 'move', from: fromSquare, to: toSquare });
+            executeAction({ type: 'move', from: fromSquare, to: toSquare }, bestMove);
           }
         }
       };
 
-      const timer = setTimeout(handleAiMove, 200);
+      const timer = setTimeout(handleAiMove, isAiVsAi ? 10 : 200);
       return () => clearTimeout(timer);
     }
-  }, [isAi, aiLoaded, localGameState?.turn, myColor]);
+  }, [isAi, aiLoaded, localGameState?.turn, myColor, isAiVsAi]);
 
   // Handle Analysis Evaluation
   useEffect(() => {
