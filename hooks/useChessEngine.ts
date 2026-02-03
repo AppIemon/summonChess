@@ -18,7 +18,7 @@ export const useChessEngine = () => {
     }
   }, []);
 
-  const getBestMove = async (fen: string, isAiVsAi: boolean = false, accuracy: number = 100): Promise<{ type: 'MOVE' | 'RESIGN'; move?: any; evaluation?: number; depth?: number; variations?: any[] }> => {
+  const getBestMove = async (fen: string, isAiVsAi: boolean = false, accuracy: number = 100, depth?: number): Promise<{ type: 'MOVE' | 'RESIGN'; move?: any; evaluation?: number; depth?: number; variations?: any[] }> => {
     // 1. Check MongoDB Cache
     try {
       // Occasionally skip cache for variety/exploration
@@ -26,7 +26,7 @@ export const useChessEngine = () => {
       const skipChance = isAiVsAi ? 0.3 : 0.1;
       const skipCache = Math.random() < skipChance;
 
-      if (!skipCache && accuracy >= 100) { // Don't use cache if accuracy < 100 as we want variety
+      if (!skipCache && accuracy >= 100 && !depth) { // Don't use cache if accuracy < 100 as we want variety, or if custom depth is requested
         const resp = await fetch(`/api/ai/best-move?fen=${encodeURIComponent(fen)}`);
         if (resp.ok) {
           const data = await resp.json();
@@ -56,33 +56,37 @@ export const useChessEngine = () => {
         return;
       }
 
+      const requestId = Math.random();
+
       const handleMessage = async (e: MessageEvent) => {
-        workerRef.current?.removeEventListener('message', handleMessage);
-        const result = e.data;
+        if (e.data.requestId === requestId) {
+          workerRef.current?.removeEventListener('message', handleMessage);
+          const result = e.data;
 
-        // 3. Save to MongoDB for future use (only if 100% accuracy)
-        if (accuracy >= 100 && result.type === 'MOVE' && result.move) {
-          try {
-            fetch('/api/ai/best-move', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                fen,
-                move: result.move,
-                score: result.evaluation || 0,
-                depth: result.depth || 4
-              })
-            }).catch(err => console.error('Cache save failed:', err));
-          } catch (err) {
-            // Background task, don't await/block
+          // 3. Save to MongoDB for future use (only if 100% accuracy and default depth)
+          if (accuracy >= 100 && !depth && result.type === 'MOVE' && result.move) {
+            try {
+              fetch('/api/ai/best-move', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  fen,
+                  move: result.move,
+                  score: result.evaluation || 0,
+                  depth: result.depth || 4
+                })
+              }).catch(err => console.error('Cache save failed:', err));
+            } catch (err) {
+              // Background task, don't await/block
+            }
           }
-        }
 
-        resolve(result);
+          resolve(result);
+        }
       };
 
       workerRef.current.addEventListener('message', handleMessage);
-      workerRef.current.postMessage({ fen, accuracy });
+      workerRef.current.postMessage({ fen, accuracy, depth, requestId });
     });
   };
 

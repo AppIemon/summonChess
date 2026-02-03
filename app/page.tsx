@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import styles from './page.module.css';
 import AuthDialog from '@/components/AuthDialog';
+import AiSettingsModal from '@/components/AiSettingsModal';
 
 interface UserInfo {
   id: string;
@@ -23,6 +24,7 @@ export default function Home() {
   const [showJoinInput, setShowJoinInput] = useState(false);
   const [error, setError] = useState('');
   const [initFailed, setInitFailed] = useState(false);
+  const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
 
   // Initialize User
   useEffect(() => {
@@ -167,6 +169,11 @@ export default function Home() {
     }
   };
 
+  const handleStartAiGame = (accuracy: number) => {
+    setIsAiSettingsOpen(false);
+    router.push(`/play/ai?accuracy=${accuracy}`);
+  };
+
   return (
     <div className={styles.container}>
       <div className={styles.content}>
@@ -203,6 +210,12 @@ export default function Home() {
           isOpen={isAuthOpen}
           onClose={() => setIsAuthOpen(false)}
           onSuccess={handleAuthSuccess}
+        />
+
+        <AiSettingsModal
+          isOpen={isAiSettingsOpen}
+          onClose={() => setIsAiSettingsOpen(false)}
+          onStart={handleStartAiGame}
         />
 
         {/* Action Buttons */}
@@ -246,7 +259,7 @@ export default function Home() {
 
               <button
                 className={styles.secondaryButton}
-                onClick={() => router.push('/play/ai')}
+                onClick={() => setIsAiSettingsOpen(true)}
                 disabled={loading || isSearching}
               >
                 🤖 컴퓨터와 대결

@@ -371,18 +371,35 @@ class AiGameState {
     return false;
   }
 
+  getKingMobility(color: number): number {
+    const kp = this.kingPos[color === WHITE ? 0 : 1];
+    if (kp === -1) return 0;
+    const x = kp % 8, y = Math.floor(kp / 8);
+    let mobility = 0;
+    for (let i = 0; i < 8; i++) {
+      const nx = x + KING_DX[i], ny = y + KING_DY[i];
+      if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
+        const targetSq = ny * 8 + nx;
+        const p = this.board[targetSq];
+        if (p === 0 || (color === WHITE ? p < 0 : p > 0)) {
+          if (!this.isSquareAttacked(targetSq, -color)) {
+            mobility++;
+          }
+        }
+      }
+    }
+    return mobility;
+  }
+
   evaluate(): number {
     let score = 0;
-
-    // 1. Piece Material & Position
-    let whiteMaterial = 0;
-    let blackMaterial = 0;
 
     const whiteKingPos = this.kingPos[0];
     const blackKingPos = this.kingPos[1];
     const wkX = whiteKingPos % 8, wkY = Math.floor(whiteKingPos / 8);
     const bkX = blackKingPos % 8, bkY = Math.floor(blackKingPos / 8);
 
+    // 1. Piece Material & Position
     for (let i = 0; i < 64; i++) {
       const pVal = this.board[i];
       if (pVal === 0) continue;
@@ -404,29 +421,92 @@ class AiGameState {
       // King proximity bonus (Pressure on enemy king)
       if (side === WHITE) {
         const dist = Math.max(Math.abs(x - bkX), Math.abs(y - bkY));
-        if (dist <= 2) v += (3 - dist) * 15;
-        whiteMaterial += v;
+        if (dist <= 2) v += (3 - dist) * 20;
+        score += v;
       } else {
         const dist = Math.max(Math.abs(x - wkX), Math.abs(y - wkY));
-        if (dist <= 2) v += (3 - dist) * 15;
-        blackMaterial += v;
+        if (dist <= 2) v += (3 - dist) * 20;
+        score -= v;
       }
     }
 
-    score = whiteMaterial - blackMaterial;
+    // 2. Reserve Material & Tactical Potential
+    const whiteSummonMask = this.getSummonMask(WHITE);
+    const blackSummonMask = this.getSummonMask(BLACK);
 
-    // 2. Reserve Material - Higher weight to encourage conservation
     for (let p = 1; p <= 5; p++) {
-      score += this.reserve[1][p] * PIECE_VALS[p] * 1.08;
-      score -= this.reserve[0][p] * PIECE_VALS[p] * 1.08;
+      const wCount = this.reserve[1][p];
+      const bCount = this.reserve[0][p];
+      score += wCount * PIECE_VALS[p] * 1.1;
+      score -= bCount * PIECE_VALS[p] * 1.1;
+
+      // Special Tactical: Queen/Knight in reserve potential
+      if (p === QUEEN || p === KNIGHT) {
+        // Bonus for potential mating squares
+        for (let k = 0; k < 8; k++) {
+          const wnx = bkX + KING_DX[k], wny = bkY + KING_DY[k];
+          if (wnx >= 0 && wnx < 8 && wny >= 0 && wny < 8 && whiteSummonMask[wny * 8 + wnx]) {
+            score += p === QUEEN ? 150 : 80; // Reward being able to summon near enemy king
+          }
+          const bnx = wkX + KING_DX[k], bny = wkY + KING_DY[k];
+          if (bnx >= 0 && bnx < 8 && bny >= 0 && bny < 8 && blackSummonMask[bny * 8 + bnx]) {
+            score -= p === QUEEN ? 150 : 80;
+          }
+        }
+      }
     }
 
-    // 3. Check & King Safety
+    // 3. King Safety & Trap Detection
+    const wMobility = this.getKingMobility(WHITE);
+    const bMobility = this.getKingMobility(BLACK);
+
+    // Each mobility square is important, but having 0 mobility is catastrophic
+    score += (wMobility - bMobility) * 35;
+    if (wMobility === 0) score -= 400;
+    if (bMobility === 0) score += 400;
+
     const whiteInCheck = this.isInCheck(WHITE);
     const blackInCheck = this.isInCheck(BLACK);
 
-    if (whiteInCheck) score -= 200;
-    if (blackInCheck) score += 200;
+    if (whiteInCheck) {
+      if (wMobility === 0) score -= 8000; // Almost mate
+      else score -= 500;
+    }
+    if (blackInCheck) {
+      if (bMobility === 0) score += 8000; // Almost mate
+      else score += 500;
+    }
+
+    // "99% Win" pattern: Knight Check on Trapped King
+    // If black king mobility is 0 or 1, and white can summon or move a knight to check
+    if (bMobility <= 1) {
+      // Check if any white knight (on board or in reserve) can check black king
+      let whiteHasKnightCheck = false;
+      // Reserve check
+      if (this.reserve[1][KNIGHT] > 0) {
+        // Find if any knight move from black king pos hits a white summon square
+        for (let k = 0; k < 8; k++) {
+          const checkSq = bkX + KNIGHT_DX[k] + (bkY + KNIGHT_DY[k]) * 8;
+          if (bkX + KNIGHT_DX[k] >= 0 && bkX + KNIGHT_DX[k] < 8 && bkY + KNIGHT_DY[k] >= 0 && bkY + KNIGHT_DY[k] < 8) {
+            if (whiteSummonMask[checkSq]) { whiteHasKnightCheck = true; break; }
+          }
+        }
+      }
+      if (whiteHasKnightCheck) score += 1500;
+    }
+
+    if (wMobility <= 1) {
+      let blackHasKnightCheck = false;
+      if (this.reserve[0][KNIGHT] > 0) {
+        for (let k = 0; k < 8; k++) {
+          const checkSq = wkX + KNIGHT_DX[k] + (wkY + KNIGHT_DY[k]) * 8;
+          if (wkX + KNIGHT_DX[k] >= 0 && wkX + KNIGHT_DX[k] < 8 && wkY + KNIGHT_DY[k] >= 0 && wkY + KNIGHT_DY[k] < 8) {
+            if (blackSummonMask[checkSq]) { blackHasKnightCheck = true; break; }
+          }
+        }
+      }
+      if (blackHasKnightCheck) score -= 1500;
+    }
 
     return this.turn === WHITE ? score : -score;
   }
@@ -447,7 +527,24 @@ function scoreMove(gs: AiGameState, m: Move, hashM: Move | null, killers: (Move 
     const kx = oppKingPos % 8, ky = Math.floor(oppKingPos / 8);
     const tx = m.to % 8, ty = Math.floor(m.to / 8);
     const dist = Math.max(Math.abs(tx - kx), Math.abs(ty - ky));
-    if (dist <= 1) return 90000 + PIECE_VALS[m.piece]; // Very high priority for adjacent summon
+
+    // Pattern 1: Queen proximity
+    if (dist <= 1) {
+      if (m.piece === QUEEN) return 95000; // Extreme priority
+      return 90000 + PIECE_VALS[m.piece];
+    }
+
+    // Pattern 2: Knight Check on Trapped King
+    if (m.piece === KNIGHT) {
+      // Check if this summon square checks the king
+      const dx = Math.abs(tx - kx), dy = Math.abs(ty - ky);
+      if ((dx === 1 && dy === 2) || (dx === 2 && dy === 1)) {
+        const mobility = gs.getKingMobility(gs.turn === WHITE ? -1 : 1);
+        if (mobility <= 1) return 96000; // Even higher priority than Queen!
+        return 85000;
+      }
+    }
+
     if (dist <= 2) return 80000 + PIECE_VALS[m.piece];
     return 10000 + PIECE_VALS[m.piece];
   }
@@ -624,14 +721,14 @@ function getPV(gs: AiGameState, depth: number): { move: Move, fen: string }[] {
 }
 
 self.onmessage = (e) => {
-  const { fen, depth: requestedDepth, accuracy = 100 } = e.data;
+  const { fen, depth: requestedDepth, accuracy = 100, requestId } = e.data;
   initZobrist();
   const startTime = Date.now();
 
   const gs = new AiGameState();
   gs.loadFen(fen);
 
-  const maxSearchDepth = 6; // Fixed depth as requested
+  const maxSearchDepth = requestedDepth || 6; // Use requested depth or default to 6
   let lastBestMove: Move | null = null;
   let finalVariations: any[] = [];
   const MAX_TIME = 3500; // Hard time limit of 3.5 seconds per search
@@ -643,11 +740,19 @@ self.onmessage = (e) => {
     const moves = gs.generateMoves();
     if (moves.length === 0) break;
 
+    // Sort moves based on previous depth or TT
     const hashIdx = Number(gs.currentHash % BigInt(TT_SIZE));
     const entry = TT[hashIdx];
     const hashM = entry?.bestMove || null;
     moves.sort((a, b) => scoreMove(gs, b, hashM, killers[d] || [null, null]) - scoreMove(gs, a, hashM, killers[d] || [null, null]));
 
+    if (d < maxSearchDepth) {
+      // Intermediate depths: Just find best move to populate TT and order moves
+      alphaBeta(gs, d, -INF, INF, 0);
+      continue;
+    }
+
+    // Final depth: Full Multi-PV search
     const variations: { move: Move, evaluation: number, pv: Move[] }[] = [];
 
     for (const m of moves) {
@@ -659,6 +764,8 @@ self.onmessage = (e) => {
         continue;
       }
 
+      // Use a slightly smaller depth for non-best moves if we are short on time? 
+      // No, for review we want consistency.
       const val = -alphaBeta(gs, d - 1, -INF, INF, 1);
       gs.undoMove(m, prevState);
 
@@ -676,7 +783,6 @@ self.onmessage = (e) => {
 
     if (variations.length > 0) {
       finalVariations = variations;
-      // Preliminary best move (best of this depth)
       lastBestMove = variations[0].move;
 
       const bestEval = variations[0].evaluation;
@@ -686,58 +792,45 @@ self.onmessage = (e) => {
   }
 
   // Pick move based on accuracy at the final depth searched
+  let resultMove = lastBestMove;
+  let resultEvaluation = 0;
+  let resultVariations = finalVariations;
+
   if (finalVariations.length > 0) {
-    const bestEval = finalVariations[0].evaluation;
+    resultEvaluation = finalVariations[0].evaluation;
 
-    if (accuracy >= 100) {
-      lastBestMove = finalVariations[0].move;
-    } else {
-      // Logic for Accuracy: 
-      // Loss = -200 * ln(accuracy / 100)
-      // We want to find a move that has a loss close to this.
+    if (accuracy < 100) {
       const targetLoss = -200 * Math.log(accuracy / 100);
-      const perspective = gs.turn === 1 ? 1 : -1;
-
-      let closestMove = finalVariations[0].move;
       let minDiff = Infinity;
 
       for (const v of finalVariations) {
-        const moveLoss = (bestEval - v.evaluation) * perspective;
-        const diff = Math.abs(moveLoss - targetLoss);
+        const loss = (finalVariations[0].evaluation - v.evaluation) * (gs.turn === 1 ? 1 : -1);
+        const diff = Math.abs(loss - targetLoss);
         if (diff < minDiff) {
           minDiff = diff;
-          closestMove = v.move;
+          resultMove = v.move;
+          resultEvaluation = v.evaluation;
         }
       }
-      lastBestMove = closestMove;
     }
   }
 
-  const bestM = lastBestMove;
-  const topVariations = finalVariations.slice(0, 5);
-  const maxVal = finalVariations[0]?.evaluation || 0;
-  const perspectiveMaxVal = (gs.turn === 1) ? maxVal : -maxVal;
+  // Final response
+  const perspectiveEval = (gs.turn === 1) ? resultEvaluation : -resultEvaluation;
 
-  if (!bestM && finalVariations.length === 0) {
-    if (gs.isInCheck(gs.turn)) {
-      self.postMessage({ type: 'RESIGN' });
-    } else {
-      self.postMessage({ type: 'MOVE', move: null });
-    }
-    return;
-  }
-
-  if (perspectiveMaxVal < -MATE_SCORE + 200) {
-    self.postMessage({ type: 'RESIGN' });
+  // If AI is totally lost (mate in sight), it might resign
+  if (perspectiveEval < -MATE_SCORE + 1000) {
+    self.postMessage({ type: 'RESIGN', requestId });
   } else {
     self.postMessage({
       type: 'MOVE',
-      move: bestM,
-      evaluation: finalVariations[0]?.evaluation,
+      move: resultMove,
+      evaluation: resultEvaluation,
       depth: maxSearchDepth,
-      variations: topVariations
+      variations: resultVariations.slice(0, 10), // Return top 10 variations
+      requestId
     });
   }
 
-  console.log(`AI search finished. Accuracy: ${accuracy}%, Target Loss: ${accuracy < 100 ? Math.round(-200 * Math.log(accuracy / 100)) : 0}`);
+  console.log(`AI search finished in ${Date.now() - startTime}ms. Depth: ${maxSearchDepth}, Accuracy: ${accuracy}%, Eval: ${resultEvaluation}`);
 };

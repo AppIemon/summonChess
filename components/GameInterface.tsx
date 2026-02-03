@@ -27,6 +27,7 @@ interface GameInterfaceProps {
   isAnalysis?: boolean;
   isAi?: boolean;
   isAiVsAi?: boolean;
+  initialAccuracy?: number;
 }
 
 const getStandardFen = (fen: string) => fen.split(' [')[0];
@@ -326,7 +327,7 @@ const formatMoveActionShort = (m: any) => {
   }
 };
 
-export default function GameInterface({ gameId, isAnalysis = false, isAi = false, isAiVsAi = false }: GameInterfaceProps) {
+export default function GameInterface({ gameId, isAnalysis = false, isAi = false, isAiVsAi = false, initialAccuracy = 100 }: GameInterfaceProps) {
   const { data: serverGameState, mutate, error } = useSWR<GameState>(
     (isAnalysis || isAi) ? null : `/api/game/${gameId}`,
     fetcher,
@@ -395,7 +396,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   const [reviewIndex, setReviewIndex] = useState<number | null>(null);
 
   // AI Difficulty (Brain Usage / Accuracy 10-100)
-  const [aiDifficulty, setAiDifficulty] = useState<number>(100);
+  const [aiDifficulty, setAiDifficulty] = useState<number>(initialAccuracy);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -884,7 +885,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       const fenBefore = reviewGame.getState().fen;
 
       // 1. Get best move evaluation for current position
-      const engineResult = await getBestMove(fenBefore, false, 100);
+      const engineResult = await getBestMove(fenBefore, false, 100, 4);
       const bestEval = engineResult.evaluation || 0;
       const bestMoveStr = engineResult.move ? formatMoveActionShort(engineResult.move) : '';
 
@@ -923,7 +924,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
           } else {
             // Need a separate evaluation for this specific move
             const fenAfter = reviewGame.getState().fen;
-            const nextRes = await getBestMove(fenAfter, false, 100);
+            const nextRes = await getBestMove(fenAfter, false, 100, 4);
             playedEval = nextRes.evaluation !== undefined ? nextRes.evaluation : bestEval;
           }
         }
