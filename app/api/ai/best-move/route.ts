@@ -58,24 +58,33 @@ export async function POST(req: NextRequest) {
 
     await connectDB();
 
-    // Check if THIS SPECIFIC move exists for this FEN
+    // We use a combination of findOne and separate create/update to handle the depth logic easily
     const existing = await BestMove.findOne({ fen, move });
 
     if (existing) {
-      // Only update if depth is >= existing depth OR if existing was "bad"
-      const isBad = existing.lossCount > existing.winCount + 1;
-      if (existing.depth > depth && !isBad) {
-        return NextResponse.json({ success: true, masked: 'Existing move has higher depth' });
-      }
+      // Only update if current depth is >= existing depth OR if existing was "bad"
+      const isBad = (existing.lossCount || 0) > (existing.winCount || 0) + 1;
 
-      await BestMove.updateOne(
-        { _id: existing._id },
-        { score, depth, updatedAt: new Date() }
-      );
+      // If the new calculation is deeper, or if the old one was bad, we update it
+      if (depth > existing.depth || isBad) {
+        await BestMove.updateOne(
+          { _id: existing._id },
+          { score, depth, updatedAt: new Date() }
+        );
+      }
     } else {
-      await BestMove.create({
-        fen, move, score, depth, winCount: 0, lossCount: 0, updatedAt: new Date()
-      });
+      // Create new record
+      try {
+        await BestMove.create({
+          fen, move, score, depth, winCount: 0, lossCount: 0, updatedAt: new Date()
+        });
+      } catch (e: any) {
+        // In case of a very tight race condition, ignore the error since the data is now there
+        if (e.code === 11000) {
+          return NextResponse.json({ success: true, message: 'Existing move created by concurrent request' });
+        }
+        throw e;
+      }
     }
 
     return NextResponse.json({ success: true });
