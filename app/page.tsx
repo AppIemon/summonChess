@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import styles from './page.module.css';
+import AuthDialog from '@/components/AuthDialog';
 
 interface UserInfo {
   id: string;
@@ -13,9 +14,10 @@ interface UserInfo {
 
 export default function Home() {
   const router = useRouter();
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
 
   const [roomCode, setRoomCode] = useState('');
   const [showJoinInput, setShowJoinInput] = useState(false);
@@ -24,38 +26,64 @@ export default function Home() {
 
   // Initialize User
   useEffect(() => {
-    const initUser = async () => {
-      let id = localStorage.getItem('playerId');
-      if (!id) {
-        id = crypto.randomUUID();
-        localStorage.setItem('playerId', id);
-      }
-
+    const checkAuth = async () => {
       try {
-        setLoading(true);
-        const res = await fetch('/api/user', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ playerId: id }),
-        });
+        const res = await fetch('/api/auth/me');
         const data = await res.json();
-        if (data.success) {
-          setUserInfo(data.user);
-          setInitFailed(false);
+
+        if (data.user) {
+          setUserInfo({
+            id: data.user.id,
+            nickname: data.user.nickname,
+            elo: data.user.rating,
+            tier: data.user.tier || getTier(data.user.rating)
+          });
         } else {
-          setInitFailed(true);
-          setError('사용자 정보를 불러오는 데 실패했습니다.');
+          // Fallback to guest if no session (optional, but keep for now if user wants to play without login)
+          // For now, let's require login or at least show login button
+          const guestId = localStorage.getItem('playerId') || crypto.randomUUID();
+          localStorage.setItem('playerId', guestId);
+
+          const guestRes = await fetch('/api/user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ playerId: guestId }),
+          });
+          const guestData = await guestRes.json();
+          if (guestData.success) {
+            setUserInfo(guestData.user);
+          }
         }
       } catch (e) {
-        console.error('Failed to sync user', e);
-        setInitFailed(true);
-        setError('서버 연결에 실패했습니다.');
+        console.error('Auth check failed', e);
       } finally {
         setLoading(false);
       }
     };
-    initUser();
+    checkAuth();
   }, []);
+
+  const getTier = (elo: number) => {
+    if (elo < 1000) return 'BRONZE';
+    if (elo < 1500) return 'SILVER';
+    if (elo < 2000) return 'GOLD';
+    return 'PLATINUM';
+  };
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.reload();
+  };
+
+  const handleAuthSuccess = (user: any) => {
+    setUserInfo({
+      id: user.id,
+      nickname: user.nickname,
+      elo: user.rating,
+      tier: user.tier || getTier(user.rating)
+    });
+    setIsAuthOpen(false);
+  };
 
   // Matchmaking Polling
   useEffect(() => {
@@ -152,14 +180,31 @@ export default function Home() {
           </p>
         </div>
 
-        {/* User Stats */}
-        {userInfo && (
-          <div className={styles.userStats}>
-            <div className={styles.tierBadge}>{userInfo.tier}</div>
-            <div className={styles.userName}>{userInfo.nickname}</div>
-            <div className={styles.userElo}>Rating: {userInfo.elo}</div>
-          </div>
-        )}
+        {/* User Stats & Auth */}
+        <div className={styles.authWrapper}>
+          {userInfo && (
+            <div className={styles.userStats}>
+              <div className={styles.tierBadge}>{userInfo.tier}</div>
+              <div className={styles.userName}>{userInfo.nickname}</div>
+              <div className={styles.userElo}>Rating: {userInfo.elo}</div>
+              {userInfo.id.length > 30 ? ( // Guest IDs are usually UUIDs
+                <button className={styles.loginButton} onClick={() => setIsAuthOpen(true)}>
+                  로그인 / 회원가입
+                </button>
+              ) : (
+                <button className={styles.logoutButton} onClick={handleLogout}>
+                  로그아웃
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        <AuthDialog
+          isOpen={isAuthOpen}
+          onClose={() => setIsAuthOpen(false)}
+          onSuccess={handleAuthSuccess}
+        />
 
         {/* Action Buttons */}
         <div className={styles.actions}>
@@ -214,6 +259,14 @@ export default function Home() {
                 disabled={loading || isSearching}
               >
                 🔬 분석 (혼자하기)
+              </button>
+
+              <button
+                className={styles.secondaryButton}
+                onClick={() => router.push('/play/ai-vs-ai')}
+                disabled={loading || isSearching}
+              >
+                📺 AI 관전 모드 (학습)
               </button>
             </div>
           ) : (

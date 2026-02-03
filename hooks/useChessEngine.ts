@@ -18,16 +18,58 @@ export const useChessEngine = () => {
     }
   }, []);
 
-  const getBestMove = (fen: string): Promise<{ type: 'MOVE' | 'RESIGN'; move?: any; evaluation?: number }> => {
+  const getBestMove = async (fen: string): Promise<{ type: 'MOVE' | 'RESIGN'; move?: any; evaluation?: number; depth?: number; variations?: any[] }> => {
+    // 1. Check MongoDB Cache
+    try {
+      const resp = await fetch(`/api/ai/best-move?fen=${encodeURIComponent(fen)}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.bestMove) {
+          console.log('AI using cached move from MongoDB');
+          // Note: Cache currently only stores one move, so variations won't be in cache
+          return {
+            type: 'MOVE',
+            move: data.bestMove.move,
+            evaluation: data.bestMove.score,
+            depth: data.bestMove.depth,
+            variations: [] // Cache doesn't have variations yet
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch cached AI move:', err);
+    }
+
+    // 2. Calculate via Worker if not in cache
     return new Promise((resolve) => {
       if (!workerRef.current) {
         resolve({ type: 'MOVE', move: null });
         return;
       }
 
-      const handleMessage = (e: MessageEvent) => {
+      const handleMessage = async (e: MessageEvent) => {
         workerRef.current?.removeEventListener('message', handleMessage);
-        resolve(e.data);
+        const result = e.data;
+
+        // 3. Save to MongoDB for future use
+        if (result.type === 'MOVE' && result.move) {
+          try {
+            fetch('/api/ai/best-move', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                fen,
+                move: result.move,
+                score: result.evaluation || 0,
+                depth: result.depth || 4
+              })
+            }).catch(err => console.error('Cache save failed:', err));
+          } catch (err) {
+            // Background task, don't await/block
+          }
+        }
+
+        resolve(result);
       };
 
       workerRef.current.addEventListener('message', handleMessage);

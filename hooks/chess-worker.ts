@@ -482,6 +482,39 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number):
   return bestVal;
 }
 
+function getPV(gs: AiGameState, depth: number): { move: Move, fen: string }[] {
+  const pv: { move: Move, fen: string }[] = [];
+  const stateStack: any[] = [];
+  const visited = new Set<bigint>();
+
+  for (let i = 0; i < depth; i++) {
+    if (visited.has(gs.currentHash)) break;
+    visited.add(gs.currentHash);
+
+    const hashIdx = Number(gs.currentHash % BigInt(TT_SIZE));
+    const entry = TT[hashIdx];
+
+    if (entry && entry.hash === gs.currentHash && entry.bestMove) {
+      const move = entry.bestMove;
+      // Note: In this simple implementation, we don't fully verify move legality here 
+      // but the TT should only contain legal best moves from previous searches.
+      const prevState = gs.captureState();
+      gs.makeMove(move);
+      pv.push({ move, fen: "" }); // We'll fill FEN if needed, but move is enough for UI
+      stateStack.push({ move, state: prevState });
+    } else {
+      break;
+    }
+  }
+
+  // Undo moves to restore state
+  for (let i = stateStack.length - 1; i >= 0; i--) {
+    gs.undoMove(stateStack[i].move, stateStack[i].state);
+  }
+
+  return pv;
+}
+
 self.onmessage = (e) => {
   const { fen } = e.data;
   initZobrist();
@@ -491,12 +524,11 @@ self.onmessage = (e) => {
   const gs = new AiGameState();
   gs.loadFen(fen);
 
-  const depth = 4; // Increased from 3 to 4 as requested
+  const depth = 4;
   let alpha = -INF;
   let beta = INF;
 
   const moves = gs.generateMoves();
-  console.log(`AI found ${moves.length} legal moves`);
   if (moves.length === 0) {
     self.postMessage({ type: 'MOVE', move: null });
     return;
@@ -505,8 +537,7 @@ self.onmessage = (e) => {
   // Pre-sort moves
   moves.sort((a, b) => scoreMove(gs, b) - scoreMove(gs, a));
 
-  let bestM = moves[0];
-  let maxVal = -INF;
+  const variations: { move: Move, evaluation: number, pv: Move[] }[] = [];
 
   for (const m of moves) {
     const prevState = gs.captureState();
@@ -517,18 +548,34 @@ self.onmessage = (e) => {
       continue;
     }
 
-    const val = -alphaBeta(gs, depth - 1, -beta, -alpha);
+    // We use a wide window here for each root move to get their exact scores
+    // This is like a Multi-PV search where we evaluate all root moves.
+    const val = -alphaBeta(gs, depth - 1, -INF, INF);
     gs.undoMove(m, prevState);
 
-    if (val > maxVal) {
-      maxVal = val;
-      bestM = m;
-    }
-    alpha = Math.max(alpha, val);
+    variations.push({
+      move: m,
+      evaluation: (gs.turn === 1) ? val : -val,
+      pv: [m, ...getPV(gs, depth - 1).map(v => v.move)]
+    });
   }
 
-  if (maxVal === -INF) {
-    // No legal moves - checkmate or stalemate
+  // Sort variations by evaluation
+  // If it's White's turn, we want highest score first. 
+  // If it's Black's turn, we want lowest score first (most negative).
+  // Actually, we want for the "side to move", the best moves.
+  // The eval already has (gs.turn === 1) ? val : -val, which is "White perspective".
+  // So if White to move, sort descending. If Black to move, sort ascending.
+  variations.sort((a, b) => {
+    if (gs.turn === 1) return b.evaluation - a.evaluation;
+    return a.evaluation - b.evaluation;
+  });
+
+  const topVariations = variations.slice(0, 5);
+  const bestM = topVariations[0]?.move || null;
+  const maxVal = (gs.turn === 1) ? (topVariations[0]?.evaluation || 0) : -(topVariations[0]?.evaluation || 0);
+
+  if (!bestM && variations.length === 0) {
     if (gs.isInCheck(gs.turn)) {
       self.postMessage({ type: 'RESIGN' });
     } else {
@@ -537,24 +584,18 @@ self.onmessage = (e) => {
     return;
   }
 
-  const bestMoveStr = bestM.type === 'SUMMON' ? `SUMMON ${bestM.piece} to ${bestM.to}` : `MOVE ${bestM.from}->${bestM.to}`;
-  console.log(`AI search finished. Best move: ${bestMoveStr}. Score: ${maxVal}. Time: ${Date.now() - startTime}ms`);
-
   // Resignation check
   if (maxVal < -MATE_SCORE + 100) {
     self.postMessage({ type: 'RESIGN' });
   } else {
-    // Convert score to standard "White perspective" score
-    // maxVal is always relative to the side to move (gs.turn)
-    // If turn is White, positive maxVal means White is winning.
-    // If turn is Black, positive maxVal means Black is winning.
-    // We want positive = White advantage, negative = Black advantage.
-
-    // However, traditionally engines return score relative to side to move. 
-    // But UI usually wants relative to White or "Absolute Advantage".
-    // Let's return standard "White is positive" score.
-    const standardScore = (gs.turn === 1 /* WHITE */) ? maxVal : -maxVal;
-
-    self.postMessage({ type: 'MOVE', move: bestM, evaluation: standardScore });
+    self.postMessage({
+      type: 'MOVE',
+      move: bestM,
+      evaluation: topVariations[0]?.evaluation,
+      depth: depth,
+      variations: topVariations
+    });
   }
+
+  console.log(`AI search finished in ${Date.now() - startTime}ms. Found ${variations.length} legal moves.`);
 };

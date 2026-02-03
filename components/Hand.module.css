@@ -19,6 +19,7 @@
   transition: all 0.2s ease;
   background: #f9f9f9;
   border: 2px solid transparent;
+  touch-action: manipulation;
 }
 
 .item:hover {

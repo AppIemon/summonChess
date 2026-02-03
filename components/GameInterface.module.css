@@ -151,9 +151,10 @@
   bottom: 0;
   left: 0;
   width: 100%;
+  height: var(--white-percent, 50%);
   background: #ffffff;
   z-index: 2;
-  transition: height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: height 0.5s cubic-bezier(0.4, 0, 0.2, 1), width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .scoreTextTop {
@@ -250,6 +251,7 @@
   border-radius: 8px 8px 0 0;
   transition: all 0.2s;
   font-size: 0.95rem;
+  touch-action: manipulation;
 }
 
 .tabButton:hover {
@@ -405,6 +407,7 @@
   align-items: center;
   justify-content: center;
   transition: all 0.2s;
+  touch-action: manipulation;
 }
 
 .chatSendBtn:hover {
@@ -446,6 +449,8 @@
   flex-wrap: wrap;
   justify-content: center;
   width: 100%;
+  position: relative;
+  z-index: 100;
 }
 
 .controls button {
@@ -457,6 +462,9 @@
   font-weight: 700;
   transition: all 0.2s;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03);
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
 }
 
 .controls button:hover {
@@ -475,6 +483,121 @@
 .resignButton:hover {
   background: #fff5f5 !important;
   border-color: #e74c3c !important;
+}
+
+/* Variations View Styles */
+.variationsContainer {
+  width: 280px;
+  background: white;
+  border-radius: 12px;
+  border: 1px solid #eee;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: 'Inter', sans-serif;
+  height: fit-content;
+  align-self: center;
+}
+
+.variationsHeader {
+  background: #f8f9fa;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #eee;
+}
+
+.variationsList {
+  display: flex;
+  flex-direction: column;
+}
+
+.variationItem {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  gap: 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.variationItem:last-child {
+  border-bottom: none;
+}
+
+.variationEval {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 700;
+  min-width: 45px;
+  text-align: right;
+}
+
+.evalPos {
+  color: #27ae60;
+}
+
+.evalNeg {
+  color: #e74c3c;
+}
+
+.variationMoves {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.variationMove {
+  font-size: 0.8rem;
+  color: #333;
+  padding: 2px 4px;
+  background: #f1f3f5;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+@media (max-width: 900px) {
+  .boardWrapper {
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .variationsContainer {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .evalBarContainer {
+    width: 100%;
+    height: 12px;
+    min-height: 12px;
+    flex-direction: row;
+  }
+
+  .evalBarWhite {
+    bottom: 0;
+    left: 0;
+    height: 100% !important;
+    width: var(--white-percent, 50%);
+  }
+
+  /* We need to override the whiteHeight logic for horizontal bar */
+
+  .scoreTextTop {
+    top: 0;
+    left: 5px;
+    width: auto;
+  }
+
+  .scoreTextBottom {
+    bottom: 0;
+    right: 5px;
+    width: auto;
+  }
 }
 
 /* Checkmate Overlay */

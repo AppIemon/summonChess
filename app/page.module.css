@@ -70,6 +70,37 @@
 .userElo {
   font-size: 0.9rem;
   color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 1rem;
+}
+
+.loginButton,
+.logoutButton {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.loginButton {
+  background: rgba(74, 158, 255, 0.2);
+  border-color: rgba(74, 158, 255, 0.4);
+}
+
+.loginButton:hover {
+  background: rgba(74, 158, 255, 0.4);
+}
+
+.logoutButton:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.authWrapper {
+  margin-bottom: 1rem;
 }
 
 /* Actions */

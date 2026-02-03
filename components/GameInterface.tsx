@@ -9,6 +9,7 @@ import styles from './GameInterface.module.css';
 import { Chess, Square } from 'chess.js';
 import { SummonChessGame } from '@/lib/game/engine';
 import { useChessEngine } from '@/hooks/useChessEngine';
+import clsx from 'clsx';
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -25,6 +26,7 @@ interface GameInterfaceProps {
   gameId: string;
   isAnalysis?: boolean;
   isAi?: boolean;
+  isAiVsAi?: boolean;
 }
 
 const getStandardFen = (fen: string) => fen.split(' [')[0];
@@ -171,14 +173,17 @@ function CheckmateOverlay({
 }
 
 // Evaluation Bar Component
-function EvalBar({ score }: { score: number | null }) {
+function EvalBar({ score, depth = 4 }: { score: number | null, depth?: number }) {
   const winChance = score === null ? 0.5 : 1 / (1 + Math.pow(10, -score / 400));
   const whiteHeight = `${winChance * 100}%`;
 
   let scoreText = '';
   if (score !== null) {
-    if (Math.abs(score) > 10000) {
-      scoreText = score > 0 ? '+M' : '-M';
+    if (Math.abs(score) > 40000) {
+      const MATE_SCORE = 50000;
+      const plies = MATE_SCORE + depth - Math.abs(score);
+      const moves = Math.ceil(plies / 2);
+      scoreText = score > 0 ? `+M${moves}` : `-M${moves}`;
     } else {
       scoreText = (score / 100).toFixed(1);
       if (score > 0) scoreText = '+' + scoreText;
@@ -186,18 +191,71 @@ function EvalBar({ score }: { score: number | null }) {
   }
 
   return (
-    <div className={styles.evalBarContainer}>
+    <div
+      className={styles.evalBarContainer}
+      style={{ '--white-percent': whiteHeight } as React.CSSProperties}
+    >
       <div className={styles.evalBarBlack}>
         {score !== null && score < 0 && <span className={styles.scoreTextTop}>{scoreText}</span>}
       </div>
-      <div className={styles.evalBarWhite} style={{ height: whiteHeight }}>
+      <div className={styles.evalBarWhite}>
         {score !== null && score >= 0 && <span className={styles.scoreTextBottom}>{scoreText}</span>}
       </div>
     </div>
   );
 }
 
-export default function GameInterface({ gameId, isAnalysis = false, isAi = false }: GameInterfaceProps) {
+// Variations View Component
+function VariationsView({ variations, depth }: { variations: any[], depth: number }) {
+  if (!variations || variations.length === 0) return null;
+
+  const formatMove = (m: any) => {
+    if (m.type === 'SUMMON') {
+      const typeNames: any = { 1: '', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K' };
+      const to = `${'abcdefgh'[m.to % 8]}${Math.floor(m.to / 8) + 1}`;
+      return `${typeNames[m.piece]}@${to}`;
+    } else {
+      const from = `${'abcdefgh'[m.from % 8]}${Math.floor(m.from / 8) + 1}`;
+      const to = `${'abcdefgh'[m.to % 8]}${Math.floor(m.to / 8) + 1}`;
+      return `${from}${to}`;
+    }
+  };
+
+  const getEvalText = (score: number) => {
+    if (Math.abs(score) > 40000) {
+      const MATE_SCORE = 50000;
+      const plies = MATE_SCORE + depth - Math.abs(score);
+      const moves = Math.ceil(plies / 2);
+      return score > 0 ? `+M${moves}` : `-M${moves}`;
+    }
+    const val = (score / 100).toFixed(1);
+    return score > 0 ? `+${val}` : val;
+  };
+
+  return (
+    <div className={styles.variationsContainer}>
+      <div className={styles.variationsHeader}>상위 수순 (깊이 {depth})</div>
+      <div className={styles.variationsList}>
+        {variations.map((v, i) => (
+          <div key={i} className={styles.variationItem}>
+            <span className={clsx(styles.variationEval, v.evaluation >= 0 ? styles.evalPos : styles.evalNeg)}>
+              {getEvalText(v.evaluation)}
+            </span>
+            <div className={styles.variationMoves}>
+              {v.pv.map((m: any, j: number) => (
+                <span key={j} className={styles.variationMove}>
+                  {j % 2 === 0 ? `${Math.floor(j / 2) + 1}.` : ''} {formatMove(m)}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function GameInterface({ gameId, isAnalysis = false, isAi = false, isAiVsAi = false }: GameInterfaceProps) {
   const { data: serverGameState, mutate, error } = useSWR<GameState>(
     (isAnalysis || isAi) ? null : `/api/game/${gameId}`,
     fetcher,
@@ -231,8 +289,11 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   const [victoryShown, setVictoryShown] = useState(false);
 
   // Evaluation Bar State
-  const [showEvalBar, setShowEvalBar] = useState(false);
+  const [showEvalBar, setShowEvalBar] = useState(isAi || isAiVsAi || isAnalysis);
+  const [showVariations, setShowVariations] = useState(isAnalysis);
   const [evalScore, setEvalScore] = useState<number | null>(null);
+  const [evalDepth, setEvalDepth] = useState<number>(4);
+  const [evalVariations, setEvalVariations] = useState<any[]>([]);
 
   // Premoves state
   const [premove, setPremove] = useState<Action | null>(null);
@@ -350,12 +411,16 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
 
   // Handle AI turn
   useEffect(() => {
-    if (isAi && aiLoaded && localGame && localGameState && localGameState.turn !== myColor && !localGameState.winner) {
+    const isAiTurn = isAiVsAi || (isAi && localGameState?.turn !== myColor);
+
+    if (isAi && aiLoaded && localGame && localGameState && isAiTurn && !localGameState.winner) {
       const handleAiMove = async () => {
-        const result: { type: 'MOVE' | 'RESIGN'; move?: any; evaluation?: number } = await getBestMove(localGameState.fen);
+        const result: any = await getBestMove(localGameState.fen);
 
         if (result.evaluation !== undefined) {
           setEvalScore(result.evaluation);
+          setEvalDepth(result.depth || 4);
+          if (result.variations) setEvalVariations(result.variations);
         }
 
         if (result.type === 'RESIGN') {
@@ -381,6 +446,21 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       return () => clearTimeout(timer);
     }
   }, [isAi, aiLoaded, localGameState?.turn, myColor]);
+
+  // Handle Analysis Evaluation
+  useEffect(() => {
+    if (isAnalysis && aiLoaded && localGameState && !localGameState.winner) {
+      const runEval = async () => {
+        const result = await getBestMove(localGameState.fen);
+        if (result.evaluation !== undefined) {
+          setEvalScore(result.evaluation);
+          setEvalDepth(result.depth || 4);
+          if (result.variations) setEvalVariations(result.variations);
+        }
+      };
+      runEval();
+    }
+  }, [isAnalysis, aiLoaded, localGameState?.fen]);
 
   // Handle Premove execution
   useEffect(() => {
@@ -667,6 +747,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         )}
         <div className={styles.status}>
           {isSpectator && <span className={styles.spectatingBadge}>👀 관전 중</span>}
+          {isAiVsAi && <span className={styles.spectatingBadge}>🤖 AI vs AI (학습 중)</span>}
           <span>차례: {gameState.turn === 'w' ? '⚪ 백' : '⚫ 흑'}</span>
           {gameState.isCheck && <span className={styles.check}>⚠️ 체크!</span>}
           {gameState.isCheckmate && <span className={styles.mate}>👑 체크메이트!</span>}
@@ -713,6 +794,9 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
           </div>
 
           <div className={styles.boardWrapper}>
+            {(isAi || isAiVsAi || isAnalysis) && showEvalBar && showVariations && (
+              <VariationsView variations={evalVariations} depth={evalDepth} />
+            )}
             <Board
               fen={gameState.fen}
               onSquareClick={handleSquareClick}
@@ -723,7 +807,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
               isCheckmate={gameState.isCheckmate}
               premove={premove as any}
             />
-            {isAi && showEvalBar && <EvalBar score={evalScore} />}
+            {(isAi || isAiVsAi || isAnalysis) && showEvalBar && <EvalBar score={evalScore} depth={evalDepth} />}
           </div>
 
           <div className={styles.timerBar}>
@@ -842,6 +926,14 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
             onClick={() => setShowEvalBar(!showEvalBar)}
           >
             📊 평가 막대 {showEvalBar ? 'ON' : 'OFF'}
+          </button>
+        )}
+        {isAnalysis && (
+          <button
+            className={showVariations ? styles.activeControl : ''}
+            onClick={() => setShowVariations(!showVariations)}
+          >
+            📜 수순 보기 {showVariations ? 'ON' : 'OFF'}
           </button>
         )}
         <button onClick={() => setMyColor(myColor === 'w' ? 'b' : 'w')}>🔄 보드 뒤집기</button>
