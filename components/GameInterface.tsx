@@ -449,6 +449,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
             gameHistoryRef.current = [];
             setShowVictory(false);
             setVictoryShown(false);
+            setFinalResult(null);
             setEvalScore(null);
             setEvalVariations([]);
           }, 3000); // 3 seconds delay to see the result
@@ -456,17 +457,17 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         }
       }
     } else {
+      // Reset shown state when game is not over (e.g. after a reset)
+      if (victoryShown) {
+        setVictoryShown(false);
+        setFinalResult(null);
+      }
       // Reset history on new game
       if (gameState && gameState.history && gameState.history.length === 0) {
         gameHistoryRef.current = [];
       }
-      // Reset shown state when game is not over (e.g. after a reset)
-      if (victoryShown) {
-        setVictoryShown(false);
-        setShowVictory(false);
-      }
     }
-  }, [gameState, victoryShown]);
+  }, [gameState?.isCheckmate, gameState?.isTimeout, gameState?.isStalemate, gameState?.isDraw, gameState?.winner, isAi, isAiVsAi, victoryShown]);
 
   // Handle AI turn
   useEffect(() => {
