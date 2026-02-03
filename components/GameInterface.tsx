@@ -440,21 +440,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
           }).catch(err => console.error('Failed to report game result:', err));
         }
 
-        // Auto-restart for AI vs AI mode
-        if (isAiVsAi) {
-          const restartTimer = setTimeout(() => {
-            const game = new SummonChessGame();
-            setLocalGame(game);
-            setLocalGameState(game.getState());
-            gameHistoryRef.current = [];
-            setShowVictory(false);
-            setVictoryShown(false);
-            setFinalResult(null);
-            setEvalScore(null);
-            setEvalVariations([]);
-          }, 3000); // 3 seconds delay to see the result
-          return () => clearTimeout(restartTimer);
-        }
+        // Auto-restart is now handled by a separate useEffect for better reliability
       }
     } else {
       // Reset shown state when game is not over (e.g. after a reset)
@@ -469,13 +455,46 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
     }
   }, [gameState?.isCheckmate, gameState?.isTimeout, gameState?.isStalemate, gameState?.isDraw, gameState?.winner, isAi, isAiVsAi, victoryShown]);
 
+  // Separate Auto-restart effect for AI vs AI mode to ensure it's not canceled by state updates
+  useEffect(() => {
+    if (!isAiVsAi) return;
+
+    const isGameOver = !!(localGameState?.isCheckmate || localGameState?.isTimeout || localGameState?.isStalemate || localGameState?.isDraw || localGameState?.winner);
+
+    if (isGameOver) {
+      const timer = setTimeout(() => {
+        const game = new SummonChessGame();
+        setLocalGame(game);
+        setLocalGameState(game.getState());
+        gameHistoryRef.current = [];
+        setShowVictory(false);
+        setVictoryShown(false);
+        setFinalResult(null);
+        setEvalScore(null);
+        setEvalVariations([]);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [isAiVsAi, localGameState?.isCheckmate, localGameState?.isTimeout, localGameState?.isStalemate, localGameState?.isDraw, localGameState?.winner]);
+
   // Handle AI turn
   useEffect(() => {
     const isAiTurn = isAiVsAi || (isAi && localGameState?.turn !== myColor);
 
-    if (aiLoaded && localGame && localGameState && isAiTurn && !localGameState.winner) {
+    const isGameOver = !!(localGameState?.isCheckmate || localGameState?.isTimeout || localGameState?.isStalemate || localGameState?.isDraw || localGameState?.winner);
+
+    if (aiLoaded && localGame && localGameState && isAiTurn && !isGameOver) {
       const handleAiMove = async () => {
+        // Check if the game ended before AI started thinking
+        const isGameOverBefore = !!(localGameState?.isCheckmate || localGameState?.isTimeout || localGameState?.isStalemate || localGameState?.isDraw || localGameState?.winner);
+        if (isGameOverBefore) return;
+
         const result: any = await getBestMove(localGameState.fen);
+
+        // Check if the game ended while AI was thinking (e.g., opponent resigned)
+        const currentLocalGameState = localGame.getState();
+        const isGameOverAfter = !!(currentLocalGameState?.isCheckmate || currentLocalGameState?.isTimeout || currentLocalGameState?.isStalemate || currentLocalGameState?.isDraw || currentLocalGameState?.winner);
+        if (isGameOverAfter) return;
 
         if (result.evaluation !== undefined) {
           setEvalScore(result.evaluation);

@@ -620,11 +620,21 @@ self.onmessage = (e) => {
     });
 
     if (variations.length > 0) {
-      lastBestMove = variations[0].move;
+      // Pick one randomly from moves within 10 centipawns of the best move for variety
+      const bestEval = variations[0].evaluation;
+      const threshold = 10;
+      const topMoves = variations.filter(v =>
+        gs.turn === 1
+          ? v.evaluation >= bestEval - threshold
+          : v.evaluation <= bestEval + threshold
+      );
+
+      const randomIdx = Math.floor(Math.random() * topMoves.length);
+      lastBestMove = topMoves[randomIdx].move;
       finalVariations = variations.slice(0, 5);
     }
 
-    console.log(`Depth ${d} finished. Best move:`, lastBestMove);
+    console.log(`Depth ${d} finished. Best move (randomized):`, lastBestMove);
   }
 
   const topVariations = finalVariations;

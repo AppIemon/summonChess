@@ -125,8 +125,8 @@ export class SummonChessGame {
       if (this.undoRequest?.status === 'pending') return { success: false, error: "Undo request already pending" };
 
       let requesterColor: PieceColor = turn;
-      if (effectivePlayerId === this.whitePlayerId) requesterColor = 'w';
-      else if (effectivePlayerId === this.blackPlayerId) requesterColor = 'b';
+      if (this.whitePlayerId && effectivePlayerId === this.whitePlayerId) requesterColor = 'w';
+      else if (this.blackPlayerId && effectivePlayerId === this.blackPlayerId) requesterColor = 'b';
 
       this.undoRequest = { from: requesterColor, status: 'pending' };
       return { success: true };
@@ -136,8 +136,8 @@ export class SummonChessGame {
       if (!this.undoRequest || this.undoRequest.status !== 'pending') return { success: false, error: "No pending undo request" };
 
       let respondentColor: PieceColor = turn === 'w' ? 'b' : 'w';
-      if (effectivePlayerId === this.whitePlayerId) respondentColor = 'w';
-      else if (effectivePlayerId === this.blackPlayerId) respondentColor = 'b';
+      if (this.whitePlayerId && effectivePlayerId === this.whitePlayerId) respondentColor = 'w';
+      else if (this.blackPlayerId && effectivePlayerId === this.blackPlayerId) respondentColor = 'b';
 
       if (this.undoRequest.from === respondentColor) return { success: false, error: "Cannot respond to your own request" };
 
@@ -198,8 +198,8 @@ export class SummonChessGame {
     } else if (action.type === 'summon') {
       return this.summonPiece(action.piece, action.square as Square);
     } else if (action.type === 'resign') {
-      if (effectivePlayerId === this.whitePlayerId) this.resignedBy = 'w';
-      else if (effectivePlayerId === this.blackPlayerId) this.resignedBy = 'b';
+      if (this.whitePlayerId && effectivePlayerId === this.whitePlayerId) this.resignedBy = 'w';
+      else if (this.blackPlayerId && effectivePlayerId === this.blackPlayerId) this.resignedBy = 'b';
       else this.resignedBy = turn;
       return { success: true };
     }

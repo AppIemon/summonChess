@@ -21,20 +21,27 @@ export const useChessEngine = () => {
   const getBestMove = async (fen: string): Promise<{ type: 'MOVE' | 'RESIGN'; move?: any; evaluation?: number; depth?: number; variations?: any[] }> => {
     // 1. Check MongoDB Cache
     try {
-      const resp = await fetch(`/api/ai/best-move?fen=${encodeURIComponent(fen)}`);
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.bestMove) {
-          console.log('AI using cached move from MongoDB');
-          // Note: Cache currently only stores one move, so variations won't be in cache
-          return {
-            type: 'MOVE',
-            move: data.bestMove.move,
-            evaluation: data.bestMove.score,
-            depth: data.bestMove.depth,
-            variations: [] // Cache doesn't have variations yet
-          };
+      // Occasionally skip cache for variety/exploration (10% chance)
+      const skipCache = Math.random() < 0.1;
+
+      if (!skipCache) {
+        const resp = await fetch(`/api/ai/best-move?fen=${encodeURIComponent(fen)}`);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.bestMove) {
+            console.log('AI using cached move from MongoDB');
+            // Note: Cache currently only stores one move, so variations won't be in cache
+            return {
+              type: 'MOVE',
+              move: data.bestMove.move,
+              evaluation: data.bestMove.score,
+              depth: data.bestMove.depth,
+              variations: [] // Cache doesn't have variations yet
+            };
+          }
         }
+      } else {
+        console.log('AI skipping cache for exploration');
       }
     } catch (err) {
       console.warn('Failed to fetch cached AI move:', err);
