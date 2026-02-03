@@ -52,6 +52,7 @@ export interface MoveAnalysis {
   comment?: string;
   color: PieceColor;
   toSquare: string;
+  variations?: any[];
 }
 
 export interface GameReviewResults {

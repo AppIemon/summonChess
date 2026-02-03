@@ -391,6 +391,52 @@ class AiGameState {
     return mobility;
   }
 
+  isSquareSummonable(sq: number, side: number): boolean {
+    if (this.board[sq] !== 0) return false;
+    const x = sq % 8, y = Math.floor(sq / 8);
+
+    // Check neighbors/paths to see if any friendly piece 'controls' this empty square
+    // Pawns
+    const dy = side === WHITE ? -1 : 1;
+    const prevY = y + dy;
+    if (prevY >= 0 && prevY <= 7) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx;
+        if (nx >= 0 && nx < 8 && this.board[prevY * 8 + nx] === PAWN * side) return true;
+      }
+    }
+    // Knights
+    for (let k = 0; k < 8; k++) {
+      const nx = x + KNIGHT_DX[k], ny = y + KNIGHT_DY[k];
+      if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
+        if (this.board[ny * 8 + nx] === KNIGHT * side) return true;
+      }
+    }
+    // King
+    for (let k = 0; k < 8; k++) {
+      const nx = x + KING_DX[k], ny = y + KING_DY[k];
+      if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
+        if (this.board[ny * 8 + nx] === KING * side) return true;
+      }
+    }
+    // Sliders
+    for (let d = 0; d < 8; d++) {
+      const dx = ATTACK_DIRS[d][0], dy = ATTACK_DIRS[d][1];
+      for (let s = 1; s < 8; s++) {
+        const nx = x + dx * s, ny = y + dy * s;
+        if (nx < 0 || nx > 7 || ny < 0 || ny > 7) break;
+        const p = this.board[ny * 8 + nx];
+        if (p !== 0) {
+          if (p === QUEEN * side) return true;
+          if (d < 4 && p === ROOK * side) return true;
+          if (d >= 4 && p === BISHOP * side) return true;
+          break;
+        }
+      }
+    }
+    return false;
+  }
+
   evaluate(): number {
     let score = 0;
 
@@ -431,26 +477,26 @@ class AiGameState {
     }
 
     // 2. Reserve Material & Tactical Potential
-    const whiteSummonMask = this.getSummonMask(WHITE);
-    const blackSummonMask = this.getSummonMask(BLACK);
-
     for (let p = 1; p <= 5; p++) {
       const wCount = this.reserve[1][p];
       const bCount = this.reserve[0][p];
       score += wCount * PIECE_VALS[p] * 1.1;
       score -= bCount * PIECE_VALS[p] * 1.1;
 
-      // Special Tactical: Queen/Knight in reserve potential
+      // Special Tactical: Queen/Knight in reserve potential near enemy king
       if (p === QUEEN || p === KNIGHT) {
-        // Bonus for potential mating squares
         for (let k = 0; k < 8; k++) {
           const wnx = bkX + KING_DX[k], wny = bkY + KING_DY[k];
-          if (wnx >= 0 && wnx < 8 && wny >= 0 && wny < 8 && whiteSummonMask[wny * 8 + wnx]) {
-            score += p === QUEEN ? 150 : 80; // Reward being able to summon near enemy king
+          if (wnx >= 0 && wnx < 8 && wny >= 0 && wny < 8 && wCount > 0) {
+            if (this.isSquareSummonable(wny * 8 + wnx, WHITE)) {
+              score += p === QUEEN ? 120 : 60;
+            }
           }
           const bnx = wkX + KING_DX[k], bny = wkY + KING_DY[k];
-          if (bnx >= 0 && bnx < 8 && bny >= 0 && bny < 8 && blackSummonMask[bny * 8 + bnx]) {
-            score -= p === QUEEN ? 150 : 80;
+          if (bnx >= 0 && bnx < 8 && bny >= 0 && bny < 8 && bCount > 0) {
+            if (this.isSquareSummonable(bny * 8 + bnx, BLACK)) {
+              score -= p === QUEEN ? 120 : 60;
+            }
           }
         }
       }
@@ -478,34 +524,22 @@ class AiGameState {
     }
 
     // "99% Win" pattern: Knight Check on Trapped King
-    // If black king mobility is 0 or 1, and white can summon or move a knight to check
-    if (bMobility <= 1) {
-      // Check if any white knight (on board or in reserve) can check black king
-      let whiteHasKnightCheck = false;
-      // Reserve check
-      if (this.reserve[1][KNIGHT] > 0) {
-        // Find if any knight move from black king pos hits a white summon square
-        for (let k = 0; k < 8; k++) {
-          const checkSq = bkX + KNIGHT_DX[k] + (bkY + KNIGHT_DY[k]) * 8;
-          if (bkX + KNIGHT_DX[k] >= 0 && bkX + KNIGHT_DX[k] < 8 && bkY + KNIGHT_DY[k] >= 0 && bkY + KNIGHT_DY[k] < 8) {
-            if (whiteSummonMask[checkSq]) { whiteHasKnightCheck = true; break; }
-          }
+    if (bMobility <= 1 && this.reserve[1][KNIGHT] > 0) {
+      for (let k = 0; k < 8; k++) {
+        const nx = bkX + KNIGHT_DX[k], ny = bkY + KNIGHT_DY[k];
+        if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
+          if (this.isSquareSummonable(ny * 8 + nx, WHITE)) { score += 1200; break; }
         }
       }
-      if (whiteHasKnightCheck) score += 1500;
     }
 
-    if (wMobility <= 1) {
-      let blackHasKnightCheck = false;
-      if (this.reserve[0][KNIGHT] > 0) {
-        for (let k = 0; k < 8; k++) {
-          const checkSq = wkX + KNIGHT_DX[k] + (wkY + KNIGHT_DY[k]) * 8;
-          if (wkX + KNIGHT_DX[k] >= 0 && wkX + KNIGHT_DX[k] < 8 && wkY + KNIGHT_DY[k] >= 0 && wkY + KNIGHT_DY[k] < 8) {
-            if (blackSummonMask[checkSq]) { blackHasKnightCheck = true; break; }
-          }
+    if (wMobility <= 1 && this.reserve[0][KNIGHT] > 0) {
+      for (let k = 0; k < 8; k++) {
+        const nx = wkX + KNIGHT_DX[k], ny = wkY + KNIGHT_DY[k];
+        if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
+          if (this.isSquareSummonable(ny * 8 + nx, BLACK)) { score -= 1200; break; }
         }
       }
-      if (blackHasKnightCheck) score -= 1500;
     }
 
     return this.turn === WHITE ? score : -score;
@@ -722,7 +756,7 @@ function getPV(gs: AiGameState, depth: number): { move: Move, fen: string }[] {
 
 self.onmessage = (e) => {
   const { fen, depth: requestedDepth, accuracy = 100, requestId } = e.data;
-  initZobrist();
+  if (!zobristInitialized) initZobrist();
   const startTime = Date.now();
 
   const gs = new AiGameState();
@@ -740,23 +774,37 @@ self.onmessage = (e) => {
     const moves = gs.generateMoves();
     if (moves.length === 0) break;
 
+    // Every depth, we try to populate variations to have a fallback
+    const variations: { move: Move, evaluation: number, pv: Move[] }[] = [];
+    const isFinalDepth = (d === maxSearchDepth);
+
     // Sort moves based on previous depth or TT
     const hashIdx = Number(gs.currentHash % BigInt(TT_SIZE));
     const entry = TT[hashIdx];
     const hashM = entry?.bestMove || null;
     moves.sort((a, b) => scoreMove(gs, b, hashM, killers[d] || [null, null]) - scoreMove(gs, a, hashM, killers[d] || [null, null]));
 
-    if (d < maxSearchDepth) {
-      // Intermediate depths: Just find best move to populate TT and order moves
-      alphaBeta(gs, d, -INF, INF, 0);
+    if (!isFinalDepth && d > 1) {
+      // For intermediate depths, we can just run once and store the best move's PV as a single variation
+      const score = alphaBeta(gs, d, -INF, INF, 0);
+      const ttEntry = TT[Number(gs.currentHash % BigInt(TT_SIZE))];
+      if (ttEntry && ttEntry.bestMove) {
+        variations.push({
+          move: ttEntry.bestMove,
+          evaluation: (gs.turn === 1) ? score : -score,
+          pv: getPV(gs, d).map(v => v.move)
+        });
+        finalVariations = variations;
+        lastBestMove = ttEntry.bestMove;
+      }
       continue;
     }
 
-    // Final depth: Full Multi-PV search
-    const variations: { move: Move, evaluation: number, pv: Move[] }[] = [];
-
-    for (const m of moves) {
-      if (d > 1 && Date.now() - startTime > MAX_TIME) break;
+    // Full Multi-PV search (for d=1 and the final depth d=maxSearchDepth)
+    for (let i = 0; i < moves.length; i++) {
+      const m = moves[i];
+      // stricter time limit check: if we already have some moves and we are over time, stop.
+      if (i > 0 && Date.now() - startTime > MAX_TIME) break;
 
       const prevState = gs.makeMove(m);
       if (gs.isInCheck(gs.turn * -1)) {
@@ -764,8 +812,8 @@ self.onmessage = (e) => {
         continue;
       }
 
-      // Use a slightly smaller depth for non-best moves if we are short on time? 
-      // No, for review we want consistency.
+      // For a very wide search at final depth, we might want to prune clearly bad moves
+      // based on a shallow search if we have many moves.
       const val = -alphaBeta(gs, d - 1, -INF, INF, 1);
       gs.undoMove(m, prevState);
 
@@ -774,6 +822,11 @@ self.onmessage = (e) => {
         evaluation: (gs.turn === 1) ? val : -val,
         pv: [m, ...getPV(gs, d - 1).map(v => v.move)]
       });
+
+      // If we have a mate, we can potentially stop early if it's high enough depth
+      if (Math.abs(val) > MATE_SCORE - 100 && i === 0 && d >= 6) {
+        break;
+      }
     }
 
     variations.sort((a, b) => {
@@ -784,10 +837,6 @@ self.onmessage = (e) => {
     if (variations.length > 0) {
       finalVariations = variations;
       lastBestMove = variations[0].move;
-
-      const bestEval = variations[0].evaluation;
-      const isWinningMate = (gs.turn === 1 && bestEval > MATE_SCORE - 100) || (gs.turn === -1 && bestEval < -MATE_SCORE + 100);
-      if (isWinningMate && d >= 4) break;
     }
   }
 

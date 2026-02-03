@@ -1406,8 +1406,19 @@
   transition: opacity .2s;
 }
 
-.difficultySlider:hover {
+.difficultySlider:hover:not(:disabled) {
   opacity: 1;
+}
+
+.difficultySlider:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.difficultySlider:disabled::-webkit-slider-thumb {
+  cursor: not-allowed;
+  background: #b2bec3;
+  box-shadow: none;
 }
 
 .difficultySlider::-webkit-slider-thumb {

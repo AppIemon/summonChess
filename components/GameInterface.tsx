@@ -310,6 +310,12 @@ const getClassificationColor = (c: MoveClassification) => {
 };
 
 const calculateAccuracy = (bestEval: number, playedEval: number, turn: PieceColor) => {
+  const MATE_THRESHOLD = 40000;
+  // If both are mate scores, count as 100% accuracy (don't penalize mate in 3 vs mate in 2)
+  if (Math.abs(bestEval) > MATE_THRESHOLD && Math.abs(playedEval) > MATE_THRESHOLD) {
+    if ((bestEval > 0 && playedEval > 0) || (bestEval < 0 && playedEval < 0)) return 100;
+  }
+
   const perspective = turn === 'w' ? 1 : -1;
   const diff = Math.max(0, (bestEval - playedEval) * perspective);
   return Math.round(Math.max(0, Math.min(100, 100 * Math.exp(-0.005 * diff))));
@@ -397,6 +403,13 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
 
   // AI Difficulty (Brain Usage / Accuracy 10-100)
   const [aiDifficulty, setAiDifficulty] = useState<number>(initialAccuracy);
+
+  useEffect(() => {
+    if (activeTab === 'review' && reviewResults) {
+      setShowVariations(true);
+      setShowEvalBar(true);
+    }
+  }, [activeTab, reviewResults]);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -565,7 +578,9 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         const isGameOverBefore = !!(localGameState?.isCheckmate || localGameState?.isTimeout || localGameState?.isStalemate || localGameState?.isDraw || localGameState?.winner);
         if (isGameOverBefore) return;
 
-        const result: any = await getBestMove(localGameState.fen, isAiVsAi, aiDifficulty);
+        // Force depth 6 for AI vs AI to ensure consistency with review
+        const targetDepth = isAiVsAi ? 6 : undefined;
+        const result: any = await getBestMove(localGameState.fen, isAiVsAi, aiDifficulty, targetDepth);
 
         // Check if the game ended while AI was thinking (e.g., opponent resigned)
         const currentLocalGameState = localGame.getState();
@@ -884,10 +899,11 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       const turn = reviewGame.getState().turn;
       const fenBefore = reviewGame.getState().fen;
 
-      // 1. Get best move evaluation for current position
-      const engineResult = await getBestMove(fenBefore, false, 100, 4);
+      // 1. Get best move evaluation for current position (Increase depth for better review)
+      const engineResult = await getBestMove(fenBefore, false, 100, 6);
       const bestEval = engineResult.evaluation || 0;
       const bestMoveStr = engineResult.move ? formatMoveActionShort(engineResult.move) : '';
+      const topVars = engineResult.variations || [];
 
       // 2. Parse and play the actual move from history
       let playedEval = bestEval;
@@ -909,22 +925,29 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         }
       }
 
+      let stateAfter = reviewGame.getState();
       if (playedAction) {
         // Execute move on review game
         reviewGame.executeAction(playedAction);
-        positions.push(reviewGame.getState().fen);
+        stateAfter = reviewGame.getState();
+        positions.push(stateAfter.fen);
 
         // Evaluate played move if it wasn't the best
         const playedMoveStr = formatMoveActionShort(playedAction);
-        if (playedMoveStr !== bestMoveStr) {
+        if (stateAfter.isCheckmate) {
+          // If the move actually ended in checkmate, it's definitively the best or brilliant
+          const MATE_VAL = 50000;
+          playedEval = turn === 'w' ? MATE_VAL : -MATE_VAL;
+        } else if (playedMoveStr === bestMoveStr) {
+          playedEval = bestEval;
+        } else {
           // Check if it's in top variations
           const matchedVar = engineResult.variations?.find(v => formatMoveActionShort(v.move) === playedMoveStr);
           if (matchedVar) {
             playedEval = matchedVar.evaluation;
           } else {
             // Need a separate evaluation for this specific move
-            const fenAfter = reviewGame.getState().fen;
-            const nextRes = await getBestMove(fenAfter, false, 100, 4);
+            const nextRes = await getBestMove(stateAfter.fen, false, 100, 6);
             playedEval = nextRes.evaluation !== undefined ? nextRes.evaluation : bestEval;
           }
         }
@@ -942,32 +965,42 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
 
       if (isForced) {
         classification = 'forced';
-      } else if (loss < 25) {
-        const absBest = Math.abs(bestEval);
-        const score = bestEval * perspective;
+      } else if (loss < 15) { // Tight threshold for top moves
+        const perspectiveAcc = bestEval * perspective;
 
-        // Relaxed criteria for Great (!) and Brilliant (!!)
-        if (loss < 10 && score > 200) classification = 'brilliant';
-        else if (loss < 20 && score > 50) classification = 'great';
-        else classification = 'best';
-      } else if (loss < 60) {
+        // Find second best move to see if this was the 'only' good move
+        const sortedVars = engineResult.variations?.sort((a, b) => (b.evaluation - a.evaluation) * perspective) || [];
+        const secondBestEval = sortedVars.length > 1 ? sortedVars[1].evaluation : (bestEval - 300 * perspective);
+        const secondLoss = Math.abs(bestEval - secondBestEval);
+
+        if (loss < 5) {
+          // Brilliant (!!) - Only if it's a very strong move in a complex or winning position, 
+          // and other moves are significantly worse.
+          if (perspectiveAcc > 300 && secondLoss > 150) classification = 'brilliant';
+          // Great (!) - Strong move that maintains a clear advantage.
+          else if (perspectiveAcc > 100 && secondLoss > 80) classification = 'great';
+          else classification = 'best';
+        } else {
+          classification = 'best';
+        }
+      } else if (loss < 50) {
         classification = 'excellent';
-      } else if (loss < 150) {
+      } else if (loss < 120) {
         classification = 'good';
       } else {
         // High loss move. Check if it's a "Miss" (missing a big advantage)
         const bestAdvantage = bestEval * perspective;
         const playedAdvantage = playedEval * perspective;
 
-        if (bestAdvantage > 150 && playedAdvantage < 50) {
+        if (bestAdvantage > 200 && playedAdvantage < 50 && !stateAfter.isCheckmate) {
           classification = 'miss';
-        } else if (loss < 350) {
+        } else if (loss < 300) {
           classification = 'inaccuracy';
-        } else if (loss < 700) {
+        } else if (loss < 600) {
           classification = 'mistake';
         } else {
           // If already significantly losing, downgrade blunder to mistake
-          if (bestAdvantage < -500) {
+          if (bestAdvantage < -600 && !stateAfter.isCheckmate) {
             classification = 'mistake';
           } else {
             classification = 'blunder';
@@ -975,7 +1008,15 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         }
       }
 
-      const moveAccuracy = calculateAccuracy(bestEval, playedEval, turn);
+      let moveAccuracy = calculateAccuracy(bestEval, playedEval, turn);
+
+      // If it's a checkmate move, ensure it's at least 'best' and 100% accuracy
+      if (stateAfter.isCheckmate) {
+        moveAccuracy = 100;
+        if (classification === 'miss' || classification === 'blunder' || classification === 'mistake' || classification === 'inaccuracy') {
+          classification = 'best';
+        }
+      }
 
       analyzedMoves.push({
         move: moveStr,
@@ -985,7 +1026,8 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         accuracy: moveAccuracy,
         comment,
         color: turn,
-        toSquare
+        toSquare,
+        variations: topVars
       });
 
       if (turn === 'w') whiteAccTotal += moveAccuracy;
@@ -1023,6 +1065,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
                 value={aiDifficulty}
                 onChange={(e) => setAiDifficulty(parseInt(e.target.value))}
                 className={styles.difficultySlider}
+                disabled={true}
               />
               <div className={styles.sliderLabels}>
                 <span>10% (초보)</span>
@@ -1170,12 +1213,17 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
           </div>
 
           <div className={styles.boardWrapper}>
-            {(isAi || isAiVsAi || isAnalysis) && showEvalBar && showVariations && (
-              <VariationsView variations={evalVariations} depth={evalDepth} />
+            {((isAi || isAiVsAi || isAnalysis) || activeTab === 'review') && showEvalBar && showVariations && (
+              <VariationsView
+                variations={activeTab === 'review' && reviewResults && reviewIndex !== null && reviewIndex >= 0
+                  ? reviewResults.moves[reviewIndex].variations || []
+                  : evalVariations}
+                depth={activeTab === 'review' ? 6 : evalDepth}
+              />
             )}
             <Board
               fen={activeTab === 'review' && reviewResults && reviewIndex !== null
-                ? reviewResults.fens[reviewIndex + 1]
+                ? (reviewIndex === -1 ? reviewResults.fens[0] : reviewResults.fens[reviewIndex + 1])
                 : gameState.fen}
               onSquareClick={handleSquareClick}
               selectedSquare={selectedSquare}
@@ -1194,7 +1242,14 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
                 }
               } : null}
             />
-            {(isAi || isAiVsAi || isAnalysis) && showEvalBar && <EvalBar score={evalScore} depth={evalDepth} />}
+            {((isAi || isAiVsAi || isAnalysis) || activeTab === 'review') && showEvalBar && (
+              <EvalBar
+                score={activeTab === 'review' && reviewResults && reviewIndex !== null
+                  ? (reviewIndex === -1 ? 0 : reviewResults.moves[reviewIndex].evaluation)
+                  : evalScore}
+                depth={activeTab === 'review' ? 6 : evalDepth}
+              />
+            )}
           </div>
 
           <div className={styles.timerBar}>
