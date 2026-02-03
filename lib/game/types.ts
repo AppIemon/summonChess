@@ -41,7 +41,7 @@ export interface GameState {
   review?: GameReviewResults | null;
 }
 
-export type MoveClassification = 'brilliant' | 'great' | 'best' | 'excellent' | 'good' | 'inaccuracy' | 'mistake' | 'blunder';
+export type MoveClassification = 'brilliant' | 'great' | 'best' | 'excellent' | 'good' | 'inaccuracy' | 'mistake' | 'blunder' | 'forced' | 'miss';
 
 export interface MoveAnalysis {
   move: string;

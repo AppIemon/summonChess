@@ -488,17 +488,23 @@ function quiescence(gs: AiGameState, alpha: number, beta: number): number {
 
 const killers: (Move | null)[][] = Array.from({ length: 32 }, () => [null, null]);
 
-function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, extensionCount: number = 0): number {
+const MATE_THRESHOLD = 40000;
+
+function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, ply: number, extensionCount: number = 0): number {
   if (depth <= 0) return quiescence(gs, alpha, beta);
 
   const hashIdx = Number(gs.currentHash % BigInt(TT_SIZE));
   const entry = TT[hashIdx];
   let hashMove: Move | null = null;
   if (entry && entry.hash === gs.currentHash) {
+    let score = entry.score;
+    if (score > MATE_THRESHOLD) score -= ply;
+    else if (score < -MATE_THRESHOLD) score += ply;
+
     if (entry.depth >= depth) {
-      if (entry.flag === TT_EXACT) return entry.score;
-      if (entry.flag === TT_ALPHA && entry.score <= alpha) return alpha;
-      if (entry.flag === TT_BETA && entry.score >= beta) return beta;
+      if (entry.flag === TT_EXACT) return score;
+      if (entry.flag === TT_ALPHA && score <= alpha) return alpha;
+      if (entry.flag === TT_BETA && score >= beta) return beta;
     }
     hashMove = entry.bestMove;
   }
@@ -513,7 +519,7 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, 
     gs.turn *= -1;
     gs.currentHash ^= zobristTurn;
     gs.epSquare = -1;
-    const val = -alphaBeta(gs, depth - 3, -beta, -beta + 1, extensionCount);
+    const val = -alphaBeta(gs, depth - 3, -beta, -beta + 1, ply + 1, extensionCount);
     gs.turn = prevState.turn;
     gs.currentHash = prevState.hash;
     gs.epSquare = prevState.ep;
@@ -522,7 +528,7 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, 
 
   const moves = gs.generateMoves();
   if (moves.length === 0) {
-    if (gs.isInCheck(gs.turn)) return -MATE_SCORE - depth;
+    if (gs.isInCheck(gs.turn)) return -MATE_SCORE + ply;
     return 0;
   }
 
@@ -551,7 +557,7 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, 
       extension = 1;
     }
 
-    const val = -alphaBeta(gs, depth - 1 + extension, -beta, -alpha, extensionCount + extension);
+    const val = -alphaBeta(gs, depth - 1 + extension, -beta, -alpha, ply + 1, extensionCount + extension);
     gs.undoMove(m, prevState);
 
     if (val > bestVal) {
@@ -559,7 +565,11 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, 
       bestM = m;
     }
     if (val >= beta) {
-      TT[hashIdx] = { hash: gs.currentHash, depth, score: val, flag: TT_BETA, bestMove: m };
+      let ttScore = val;
+      if (ttScore > MATE_THRESHOLD) ttScore += ply;
+      else if (ttScore < -MATE_THRESHOLD) ttScore -= ply;
+
+      TT[hashIdx] = { hash: gs.currentHash, depth, score: ttScore, flag: TT_BETA, bestMove: m };
       if (!m.captured && depth < 32) {
         killers[depth][1] = killers[depth][0];
         killers[depth][0] = m;
@@ -573,11 +583,14 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, 
   }
 
   if (moveCount === 0) {
-    if (gs.isInCheck(gs.turn)) return -MATE_SCORE - depth;
+    if (gs.isInCheck(gs.turn)) return -MATE_SCORE + ply;
     return 0;
   }
 
-  TT[hashIdx] = { hash: gs.currentHash, depth, score: bestVal, flag, bestMove: bestM };
+  let ttScore = bestVal;
+  if (ttScore > MATE_THRESHOLD) ttScore += ply;
+  else if (ttScore < -MATE_THRESHOLD) ttScore -= ply;
+  TT[hashIdx] = { hash: gs.currentHash, depth, score: ttScore, flag, bestMove: bestM };
   return bestVal;
 }
 
@@ -646,7 +659,7 @@ self.onmessage = (e) => {
         continue;
       }
 
-      const val = -alphaBeta(gs, d - 1, -INF, INF);
+      const val = -alphaBeta(gs, d - 1, -INF, INF, 1);
       gs.undoMove(m, prevState);
 
       variations.push({

@@ -185,7 +185,7 @@ function EvalBar({ score, depth = 4 }: { score: number | null, depth?: number })
   if (score !== null) {
     if (Math.abs(score) > 40000) {
       const MATE_SCORE = 50000;
-      const plies = MATE_SCORE + depth - Math.abs(score);
+      const plies = MATE_SCORE - Math.abs(score);
       const moves = Math.ceil(plies / 2);
       scoreText = score > 0 ? `+M${moves}` : `-M${moves}`;
     } else {
@@ -228,7 +228,7 @@ function VariationsView({ variations, depth }: { variations: any[], depth: numbe
   const getEvalText = (score: number) => {
     if (Math.abs(score) > 40000) {
       const MATE_SCORE = 50000;
-      const plies = MATE_SCORE + depth - Math.abs(score);
+      const plies = MATE_SCORE - Math.abs(score);
       const moves = Math.ceil(plies / 2);
       return score > 0 ? `+M${moves}` : `-M${moves}`;
     }
@@ -270,6 +270,8 @@ const getClassificationIcon = (c: MoveClassification) => {
     case 'inaccuracy': return '?!';
     case 'mistake': return '?';
     case 'blunder': return '??';
+    case 'forced': return '□';
+    case 'miss': return '✕';
     default: return '';
   }
 };
@@ -284,6 +286,8 @@ const getClassificationText = (c: MoveClassification) => {
     case 'inaccuracy': return '부정확함';
     case 'mistake': return '실수';
     case 'blunder': return '블런더';
+    case 'forced': return '강제';
+    case 'miss': return '놓친 수';
     default: return '';
   }
 };
@@ -298,6 +302,8 @@ const getClassificationColor = (c: MoveClassification) => {
     case 'inaccuracy': return '#f0c15c';
     case 'mistake': return '#e6912c';
     case 'blunder': return '#b33430';
+    case 'forced': return '#769656';
+    case 'miss': return '#da1e8a';
     default: return '#888';
   }
 };
@@ -927,19 +933,34 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       let classification: MoveClassification = 'best';
       let comment = '';
 
-      if (loss < 15) {
-        const absBest = Math.abs(bestEval);
-        if (absBest < 50 && (bestEval * perspective) > 100) classification = 'brilliant';
-        else if (absBest < 100 && (bestEval * perspective) > 150) classification = 'great';
-        else classification = 'best';
-      } else if (loss < 60) classification = 'excellent';
-      else if (loss < 150) classification = 'good';
-      else if (loss < 350) classification = 'inaccuracy';
-      else if (loss < 700) classification = 'mistake';
-      else classification = 'blunder';
+      const legalActionsCount = reviewGame.getLegalActionsCount();
+      const isForced = legalActionsCount === 1;
 
-      if (classification === 'brilliant') comment = '탁월합니다! 승기를 잡는 결정적인 수입니다.';
-      else if (classification === 'blunder') comment = '치명적인 실수입니다. 경기를 매우 어렵게 만듭니다.';
+      if (isForced) {
+        classification = 'forced';
+      } else if (loss < 15) {
+        const absBest = Math.abs(bestEval);
+        if (absBest < 80 && (bestEval * perspective) > 100) classification = 'brilliant';
+        else if (absBest < 150 && (bestEval * perspective) > 120) classification = 'great';
+        else classification = 'best';
+      } else if (loss < 60) {
+        classification = 'excellent';
+      } else if (loss < 150) {
+        classification = 'good';
+      } else {
+        // High loss move. Check if it's a "Miss" (missing a big advantage)
+        const bestAdvantage = bestEval * perspective;
+        const playedAdvantage = playedEval * perspective;
+        if (bestAdvantage > 150 && playedAdvantage < 50) {
+          classification = 'miss';
+        } else if (loss < 350) {
+          classification = 'inaccuracy';
+        } else if (loss < 700) {
+          classification = 'mistake';
+        } else {
+          classification = 'blunder';
+        }
+      }
 
       const moveAccuracy = calculateAccuracy(bestEval, playedEval, turn);
 
@@ -979,7 +1000,12 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         {(isAi || isAiVsAi || isAnalysis || (gameState && (gameState.winner || gameState.isDraw))) && (
           <button
             className={activeTab === 'review' ? styles.activeControl : ''}
-            onClick={() => setActiveTab('review')}
+            onClick={() => {
+              setActiveTab('review');
+              if (!reviewResults && !reviewProgress) {
+                handleStartReview();
+              }
+            }}
           >
             🔍 게임 리뷰
           </button>
@@ -997,6 +1023,21 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
           <button onClick={isSpectator ? handleQuit : handleReturnToLobby}>
             🚪 {isAnalysis ? '그만하기' : (isSpectator ? '나가기' : '대기실로')}
           </button>
+        )}
+        {isAi && !isAiVsAi && (
+          <button onClick={() => {
+            if (confirm('게임을 재시작하시겠습니까?')) {
+              const newGame = new SummonChessGame();
+              setLocalGame(newGame);
+              setLocalGameState(newGame.getState());
+              setReviewResults(null);
+              setReviewProgress(null);
+              setReviewIndex(null);
+              setIsAnalysis(false);
+              setShowVictory(false);
+              setFinalResult(null);
+            }
+          }}>🔄 재시작</button>
         )}
       </>
     );
@@ -1098,15 +1139,12 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
               selectedSquare={selectedSquare}
               validTargetSquares={validTargetSquares}
               orientation={myColor}
-              lastMove={activeTab === 'review' && reviewResults && reviewIndex !== null ? (() => {
-                // Return highlighting for the reviewed move
-                // We'd need 'from' too, but at least we have 'to'
-                // Let's just highlight the 'toSquare'
-                return { from: '', to: reviewResults.moves[reviewIndex].toSquare };
-              })() : gameState.lastMove}
+              lastMove={activeTab === 'review' && reviewResults && reviewIndex !== null ? (
+                reviewIndex >= 0 ? { from: '', to: reviewResults.moves[reviewIndex].toSquare } : null
+              ) : gameState.lastMove}
               isCheckmate={gameState.isCheckmate}
               premove={premove as any}
-              annotations={activeTab === 'review' && reviewResults && reviewIndex !== null ? {
+              annotations={activeTab === 'review' && reviewResults && reviewIndex !== null && reviewIndex >= 0 ? {
                 [reviewResults.moves[reviewIndex].toSquare]: {
                   icon: getClassificationIcon(reviewResults.moves[reviewIndex].classification),
                   color: getClassificationColor(reviewResults.moves[reviewIndex].classification)
@@ -1159,7 +1197,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
               🔍 리뷰
             </button>
             <button
-              className={`${styles.tabButton} ${styles.mobileOnly} ${activeTab === 'menu' ? styles.activeTab : ''}`}
+              className={`${styles.tabButton} ${activeTab === 'menu' ? styles.activeTab : ''}`}
               onClick={() => setActiveTab('menu')}
             >
               ⚙️ 기타
@@ -1275,7 +1313,11 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
                       {reviewResults?.moves.map((move: MoveAnalysis, i: number) => (
                         <div
                           key={i}
-                          className={clsx(styles.reviewMoveItem, reviewIndex === i && styles.selectedReviewMove)}
+                          className={clsx(
+                            styles.reviewMoveItem,
+                            reviewIndex === i && styles.selectedReviewMove,
+                            move.color === 'w' ? styles.whiteMove : styles.blackMove
+                          )}
                           onClick={() => setReviewIndex(i)}
                         >
                           <div className={`${styles.classificationIcon} ${styles['icon_' + move.classification]}`}>
@@ -1293,6 +1335,25 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
                         </div>
                       ))}
                     </div>
+                    <div className={styles.reviewNav}>
+                      <button
+                        className={styles.navBtn}
+                        disabled={reviewIndex === null || reviewIndex < 0}
+                        onClick={() => setReviewIndex(prev => (prev !== null ? (prev === -1 ? -1 : prev - 1) : -1))}
+                      >
+                        이전
+                      </button>
+                      <div className={styles.navInfo}>
+                        {reviewIndex !== null ? (reviewIndex === -1 ? "시작" : `${reviewIndex + 1} / ${reviewResults?.moves.length}`) : "-"}
+                      </div>
+                      <button
+                        className={styles.navBtn}
+                        disabled={reviewIndex === null || reviewIndex >= (reviewResults?.moves.length || 0) - 1}
+                        onClick={() => setReviewIndex(prev => (prev !== null ? Math.min((reviewResults?.moves.length || 0) - 1, prev + 1) : 0))}
+                      >
+                        다음
+                      </button>
+                    </div>
                   </>
                 )}
               </div>
@@ -1307,9 +1368,6 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         </div>
       </div>
 
-      <div className={styles.controls}>
-        {renderControls()}
-      </div>
 
       {isAnalysis && (
         <div className={styles.analysisTools}>

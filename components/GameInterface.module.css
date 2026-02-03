@@ -879,18 +879,80 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  background: white;
+  background: #fdfdfd;
+  padding: 10px 0;
 }
 
 .reviewMoveItem {
   display: flex;
-  align-items: center;
-  padding: 12px 16px;
-  gap: 12px;
-  border-bottom: 1px solid #f8f9fa;
   cursor: pointer;
   transition: all 0.2s;
   border-left: 3px solid transparent;
+  max-width: 85%;
+  margin: 4px 12px;
+  border-radius: 12px;
+  border-bottom: none;
+  align-items: center;
+  padding: 10px 14px;
+  gap: 12px;
+}
+
+.whiteMove {
+  align-self: flex-start;
+  background: #fff;
+  border: 1px solid #efefef;
+}
+
+.blackMove {
+  align-self: flex-end;
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  flex-direction: row-reverse;
+  text-align: right;
+}
+
+.blackMove .moveInfo {
+  align-items: flex-end;
+}
+
+.reviewNav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: white;
+  border-top: 1px solid #eee;
+  gap: 15px;
+}
+
+.navBtn {
+  padding: 8px 16px;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  font-weight: 700;
+  color: #495057;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex: 1;
+}
+
+.navBtn:hover:not(:disabled) {
+  background: #e9ecef;
+  border-color: #adb5bd;
+}
+
+.navBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.navInfo {
+  font-weight: 800;
+  font-family: 'JetBrains Mono', monospace;
+  color: #1a1a2e;
+  min-width: 60px;
+  text-align: center;
 }
 
 .selectedReviewMove {

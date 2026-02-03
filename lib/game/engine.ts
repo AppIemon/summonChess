@@ -207,6 +207,35 @@ export class SummonChessGame {
     return { success: false, error: "Invalid action" };
   }
 
+  public getLegalActionsCount(): number {
+    let count = this.chess.moves().length;
+    const turn = this.chess.turn();
+    const deck = turn === 'w' ? this.whiteDeck : this.blackDeck;
+
+    // If deck is empty, only chess moves are legal
+    if (deck.length === 0) return count;
+
+    // Count legal summonings
+    const uniquePieces = Array.from(new Set(deck));
+    for (let r = 1; r <= 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const sq = (String.fromCharCode(97 + c) + r) as Square;
+        // Optimization: check if square is occupied first
+        if (!this.chess.get(sq) && isReachableByOwnPiece(this.chess, sq, turn)) {
+          for (const piece of uniquePieces) {
+            if (piece === 'p' && (r === 1 || r === 8)) continue;
+            // Test putting piece to check for self-check
+            if (this.chess.put({ type: piece, color: turn }, sq)) {
+              if (!this.chess.inCheck()) count++;
+              this.chess.remove(sq);
+            }
+          }
+        }
+      }
+    }
+    return count;
+  }
+
   public undo(): { success: boolean, error?: string } {
     if (this.stateStack.length === 0) return { success: false, error: "No history to undo" };
 
