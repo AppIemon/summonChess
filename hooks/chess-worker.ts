@@ -594,7 +594,12 @@ function scoreMove(gs: AiGameState, m: Move, hashM: Move | null, killers: (Move 
   return 0;
 }
 
-function quiescence(gs: AiGameState, alpha: number, beta: number): number {
+function quiescence(gs: AiGameState, alpha: number, beta: number, ply: number = 0): number {
+  if ((ply & 31) === 0 && Date.now() - searchStartTime > searchMAX_TIME) {
+    isSearchAborted = true;
+    return 0;
+  }
+
   const standPat = gs.evaluate();
   if (standPat >= beta) return beta;
   if (alpha < standPat) alpha = standPat;
@@ -608,9 +613,10 @@ function quiescence(gs: AiGameState, alpha: number, beta: number): number {
       gs.undoMove(m, prevState);
       continue;
     }
-    const val = -quiescence(gs, -beta, -alpha);
+    const val = -quiescence(gs, -beta, -alpha, ply + 1);
     gs.undoMove(m, prevState);
 
+    if (isSearchAborted) return 0;
     if (val >= beta) return beta;
     if (val > alpha) alpha = val;
   }
@@ -621,8 +627,18 @@ const killers: (Move | null)[][] = Array.from({ length: 32 }, () => [null, null]
 
 const MATE_THRESHOLD = 40000;
 
+let searchStartTime = 0;
+let searchMAX_TIME = 3500;
+let isSearchAborted = false;
+
 function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, ply: number, extensionCount: number = 0): number {
   if (depth <= 0) return quiescence(gs, alpha, beta);
+
+  // Time check every ~1024 nodes or at nodes depth/ply 0
+  if ((ply & 15) === 0 && Date.now() - searchStartTime > searchMAX_TIME) {
+    isSearchAborted = true;
+    return 0; // Abort
+  }
 
   const hashIdx = Number(gs.currentHash % BigInt(TT_SIZE));
   const entry = TT[hashIdx];
@@ -691,6 +707,8 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, 
     const val = -alphaBeta(gs, depth - 1 + extension, -beta, -alpha, ply + 1, extensionCount + extension);
     gs.undoMove(m, prevState);
 
+    if (isSearchAborted) return 0;
+
     if (val > bestVal) {
       bestVal = val;
       bestM = m;
@@ -757,19 +775,19 @@ function getPV(gs: AiGameState, depth: number): { move: Move, fen: string }[] {
 self.onmessage = (e) => {
   const { fen, depth: requestedDepth, accuracy = 100, requestId } = e.data;
   if (!zobristInitialized) initZobrist();
-  const startTime = Date.now();
+  searchStartTime = Date.now();
+  searchMAX_TIME = 3500;
+  isSearchAborted = false;
 
   const gs = new AiGameState();
   gs.loadFen(fen);
 
-  const maxSearchDepth = requestedDepth || 6; // Use requested depth or default to 6
+  const maxSearchDepth = requestedDepth || 6;
   let lastBestMove: Move | null = null;
   let finalVariations: any[] = [];
-  const MAX_TIME = 3500; // Hard time limit of 3.5 seconds per search
 
   for (let d = 1; d <= maxSearchDepth; d++) {
-    const currentTime = Date.now();
-    if (d > 1 && currentTime - startTime > MAX_TIME * 0.7) break;
+    if (d > 1 && Date.now() - searchStartTime > searchMAX_TIME * 0.7) break;
 
     const moves = gs.generateMoves();
     if (moves.length === 0) break;
@@ -787,15 +805,16 @@ self.onmessage = (e) => {
     if (!isFinalDepth && d > 1) {
       // For intermediate depths, we can just run once and store the best move's PV as a single variation
       const score = alphaBeta(gs, d, -INF, INF, 0);
+      if (isSearchAborted) break;
+
       const ttEntry = TT[Number(gs.currentHash % BigInt(TT_SIZE))];
       if (ttEntry && ttEntry.bestMove) {
-        variations.push({
+        lastBestMove = ttEntry.bestMove;
+        finalVariations = [{
           move: ttEntry.bestMove,
           evaluation: (gs.turn === 1) ? score : -score,
           pv: getPV(gs, d).map(v => v.move)
-        });
-        finalVariations = variations;
-        lastBestMove = ttEntry.bestMove;
+        }];
       }
       continue;
     }
@@ -803,8 +822,7 @@ self.onmessage = (e) => {
     // Full Multi-PV search (for d=1 and the final depth d=maxSearchDepth)
     for (let i = 0; i < moves.length; i++) {
       const m = moves[i];
-      // stricter time limit check: if we already have some moves and we are over time, stop.
-      if (i > 0 && Date.now() - startTime > MAX_TIME) break;
+      if (i > 0 && Date.now() - searchStartTime > searchMAX_TIME) break;
 
       const prevState = gs.makeMove(m);
       if (gs.isInCheck(gs.turn * -1)) {
@@ -812,10 +830,9 @@ self.onmessage = (e) => {
         continue;
       }
 
-      // For a very wide search at final depth, we might want to prune clearly bad moves
-      // based on a shallow search if we have many moves.
       const val = -alphaBeta(gs, d - 1, -INF, INF, 1);
       gs.undoMove(m, prevState);
+      if (isSearchAborted) break;
 
       variations.push({
         move: m,
@@ -823,11 +840,16 @@ self.onmessage = (e) => {
         pv: [m, ...getPV(gs, d - 1).map(v => v.move)]
       });
 
-      // If we have a mate, we can potentially stop early if it's high enough depth
+      // Update fallbacks immediately so we have something if we break later
+      if (i === 0) lastBestMove = m;
+      finalVariations = variations;
+
+      // If we have a mate, stop early
       if (Math.abs(val) > MATE_SCORE - 100 && i === 0 && d >= 6) {
         break;
       }
     }
+    if (isSearchAborted) break;
 
     variations.sort((a, b) => {
       if (gs.turn === 1) return b.evaluation - a.evaluation;
@@ -881,5 +903,5 @@ self.onmessage = (e) => {
     });
   }
 
-  console.log(`AI search finished in ${Date.now() - startTime}ms. Depth: ${maxSearchDepth}, Accuracy: ${accuracy}%, Eval: ${resultEvaluation}`);
+  console.log(`AI search finished in ${Date.now() - searchStartTime}ms. Depth: ${maxSearchDepth} (Final searched d=${maxSearchDepth}), Accuracy: ${accuracy}%, Eval: ${resultEvaluation}`);
 };

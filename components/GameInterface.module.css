@@ -1458,3 +1458,51 @@
   line-height: 1.4;
   font-style: italic;
 }
+
+.scenarioNotice {
+  background: #fff5f5;
+  border: 1px solid #feb2b2;
+  border-radius: 12px;
+  padding: 10px 15px;
+  margin: 10px 15px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: #c53030;
+  font-weight: 700;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+.scenarioNotice button {
+  background: #c53030;
+  color: white;
+  border: none;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.scenarioNotice button:hover {
+  background: #9b2c2c;
+  transform: translateY(-1px);
+}
+
+.scenarioDivider {
+  padding: 8px 15px;
+  background: #f1f3f5;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 10px;
+}
+
+.scenarioMoveItem {
+  border-left: 3px solid #667eea;
+  background: #f8faff !important;
+}
