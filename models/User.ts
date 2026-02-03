@@ -28,11 +28,10 @@ const UserSchema: Schema = new Schema(
   { timestamps: true }
 );
 
-UserSchema.pre('save', function (next) {
+UserSchema.pre('save', async function (this: any) {
   if (this.isNew || !this.id) {
     this.id = this._id.toString();
   }
-  next();
 });
 
 // Prevent model overwrite in development

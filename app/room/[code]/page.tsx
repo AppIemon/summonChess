@@ -38,15 +38,25 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
     params.then(p => setRoomCode(p.code.toUpperCase()));
   }, [params]);
 
-  // Initialize player ID
+  // Initialize player and check auth
   useEffect(() => {
-    let id = localStorage.getItem('playerId');
-    if (!id) {
-      id = crypto.randomUUID();
-      localStorage.setItem('playerId', id);
-    }
-    setPlayerId(id);
-  }, []);
+    const checkAuth = async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        const data = await res.json();
+        if (data.user) {
+          setPlayerId(data.user.id);
+        } else {
+          // If not logged in, redirect to home to login
+          router.push('/?auth=true');
+        }
+      } catch (e) {
+        console.error('Auth check failed:', e);
+        router.push('/');
+      }
+    };
+    checkAuth();
+  }, [router]);
 
   // Fetch room status
   const fetchRoom = useCallback(async () => {

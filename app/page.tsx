@@ -39,23 +39,16 @@ export default function Home() {
             tier: data.user.tier || getTier(data.user.rating)
           });
         } else {
-          // Fallback to guest if no session (optional, but keep for now if user wants to play without login)
-          // For now, let's require login or at least show login button
-          const guestId = localStorage.getItem('playerId') || crypto.randomUUID();
-          localStorage.setItem('playerId', guestId);
-
-          const guestRes = await fetch('/api/user', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ playerId: guestId }),
-          });
-          const guestData = await guestRes.json();
-          if (guestData.success) {
-            setUserInfo(guestData.user);
+          setUserInfo(null);
+          // Check if we should open auth modal automatically
+          const urlParams = new URLSearchParams(window.location.search);
+          if (urlParams.get('auth') === 'true') {
+            setIsAuthOpen(true);
           }
         }
       } catch (e) {
         console.error('Auth check failed', e);
+        setUserInfo(null);
       } finally {
         setLoading(false);
       }
@@ -109,9 +102,7 @@ export default function Home() {
 
   const handleCreateRoom = async () => {
     if (!userInfo) {
-      if (initFailed) {
-        setError('사용자 초기화에 실패했습니다. 페이지를 새로고침 해주세요.');
-      }
+      setIsAuthOpen(true);
       return;
     }
     setLoading(true);
@@ -121,7 +112,7 @@ export default function Home() {
       const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId: userInfo.id }), // Nickname handled by server
+        body: JSON.stringify({ playerId: userInfo.id }),
       });
 
       const data = await res.json();
@@ -142,16 +133,24 @@ export default function Home() {
       setError('방 코드를 입력해주세요.');
       return;
     }
+
+    if (!userInfo) {
+      setIsAuthOpen(true);
+      return;
+    }
+
     router.push(`/room/${roomCode.trim().toUpperCase()}`);
   };
 
   const toggleMatchmaking = async () => {
-    if (!userInfo) return;
+    if (!userInfo) {
+      setIsAuthOpen(true);
+      return;
+    }
 
     if (isSearching) {
       // Cancel
       setIsSearching(false);
-      // Ideally call API to cancel
     } else {
       // Start
       setIsSearching(true);

@@ -315,8 +315,22 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   const [activeTab, setActiveTab] = useState<'chat' | 'history' | 'hands'>('chat');
   const historyEndRef = useRef<HTMLDivElement>(null);
 
+  const [username, setUsername] = useState<string>('Unknown');
+
   useEffect(() => {
-    setPlayerId(localStorage.getItem('playerId'));
+    const checkAuth = async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        const data = await res.json();
+        if (data.user) {
+          setPlayerId(data.user.id);
+          setUsername(data.user.nickname);
+        }
+      } catch (e) {
+        console.error('Auth check in GameInterface failed:', e);
+      }
+    };
+    checkAuth();
   }, []);
 
   // Update effect to scroll history
@@ -626,7 +640,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   const handleSendChat = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!chatInput.trim()) return;
-    const nickname = localStorage.getItem('nickname') || 'Unknown';
+    const nickname = username || 'Unknown';
     const text = chatInput;
     setChatInput('');
     await executeAction({ type: 'chat', text, nickname });
