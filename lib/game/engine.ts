@@ -86,6 +86,7 @@ export class SummonChessGame {
       chat: [...this.chat],
       roomCode: this.roomCode,
       undoRequest: this.undoRequest,
+      resignedBy: this.resignedBy,
     };
   }
 

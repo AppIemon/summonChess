@@ -772,13 +772,33 @@
   }
 
   .controls {
+    display: none !important;
+    /* Hide original controls on mobile since we have menu tab */
+  }
+
+  .mobileControls {
+    display: flex;
     flex-direction: column;
+    gap: 12px;
+    padding: 20px;
     width: 100%;
   }
 
-  .controls button {
+  .mobileControls button {
     width: 100%;
+    padding: 16px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    font-weight: 700;
   }
+}
+
+.menuTabContainer {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Undo Overlay */

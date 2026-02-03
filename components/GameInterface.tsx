@@ -117,6 +117,7 @@ function CheckmateOverlay({
   onAutoClose: () => void
 }) {
   const isWhiteWinner = winner === 'w';
+  const winnerNickname = winner === 'w' ? '백' : (winner === 'b' ? '흑' : '');
   const [countdown, setCountdown] = useState(3);
 
   useEffect(() => {
@@ -133,7 +134,10 @@ function CheckmateOverlay({
     if (isCheckmate) return '킹이 공격받고 있으며 탈출할 수 없습니다.';
     if (isStalemate) return '더 이상 움직일 수 있는 수가 없습니다. (스테일메이트)';
     if (isStalemate || winner === null) return '무승부입니다.';
-    return '상대가 기권했습니다.';
+
+    // For resignation, check who won to determine who resigned
+    const loser = winner === 'w' ? '흑' : '백';
+    return `${loser}이 기권했습니다.`;
   };
 
   const getTitle = () => {
@@ -162,7 +166,7 @@ function CheckmateOverlay({
             {getTitle()}
           </div>
           <div className={`${styles.winnerText} ${winner === 'w' ? styles.winnerWhite : (winner === 'b' ? styles.winnerBlack : '')}`}>
-            {isStalemate || winner === null ? '무승부' : (winner === 'w' ? '백 승리' : '흑 승리')}
+            {isStalemate || winner === null ? '무승부' : `${winnerNickname} 승리`}
           </div>
           <div className={styles.reasonText}>{getReason()}</div>
           <div className={styles.autoCloseText}>{countdown}초 후 보드로 돌아갑니다...</div>
@@ -312,7 +316,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   const [lastChatCount, setLastChatCount] = useState(0);
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<'chat' | 'history' | 'hands'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'history' | 'hands' | 'menu'>('chat');
   const historyEndRef = useRef<HTMLDivElement>(null);
   const gameHistoryRef = useRef<{ fen: string, move: any, color: PieceColor }[]>([]);
 
@@ -468,7 +472,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   useEffect(() => {
     const isAiTurn = isAiVsAi || (isAi && localGameState?.turn !== myColor);
 
-    if (isAi && aiLoaded && localGame && localGameState && isAiTurn && !localGameState.winner) {
+    if (aiLoaded && localGame && localGameState && isAiTurn && !localGameState.winner) {
       const handleAiMove = async () => {
         const result: any = await getBestMove(localGameState.fen);
 
@@ -497,7 +501,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         }
       };
 
-      const timer = setTimeout(handleAiMove, isAiVsAi ? 10 : 200);
+      const timer = setTimeout(handleAiMove, isAiVsAi ? 100 : 200);
       return () => clearTimeout(timer);
     }
   }, [isAi, aiLoaded, localGameState?.turn, myColor, isAiVsAi]);
@@ -764,6 +768,43 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
     alert('기보가 복사되었습니다!');
   };
 
+  const renderControls = () => {
+    return (
+      <>
+        {(isAi || isAiVsAi || isAnalysis) && (
+          <button
+            className={showEvalBar ? styles.activeControl : ''}
+            onClick={() => setShowEvalBar(!showEvalBar)}
+          >
+            📊 평가 막대 {showEvalBar ? 'ON' : 'OFF'}
+          </button>
+        )}
+        {isAnalysis && (
+          <button
+            className={showVariations ? styles.activeControl : ''}
+            onClick={() => setShowVariations(!showVariations)}
+          >
+            📜 수순 보기 {showVariations ? 'ON' : 'OFF'}
+          </button>
+        )}
+        <button onClick={() => setMyColor(myColor === 'w' ? 'b' : 'w')}>🔄 보드 뒤집기</button>
+        {!isAnalysis && <button onClick={handleUndoRequest} disabled={!!gameState.undoRequest || gameState.history.length === 0}>↩️ 무르기</button>}
+        {isAnalysis && <button onClick={handleUndoRequest} disabled={gameState.history.length === 0}>↩️ 무르기</button>}
+        {!isAnalysis && <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/room/${gameId}`); alert('링크가 복사되었습니다!'); }}>📋 링크 공유</button>}
+        <button onClick={handleCopyNotation}>📝 기보 복사</button>
+        <button onClick={() => alert('🎮 조작 가이드\n\n• 왼쪽: 소환 가능한 기물 목록 (클릭 후 보드에 소환)\n• 중앙: 체스 보드 및 타이머\n• 오른쪽: 실시간 채팅\n• 프리무브: 상대 차례에 예약 가능')}>❓ 가이드</button>
+        {!isAnalysis && !gameState.winner && !isAiVsAi && !isSpectator && (
+          <button className={styles.resignButton} onClick={handleResign}>🏳️ 기권</button>
+        )}
+        {(isAnalysis || gameState.winner || isSpectator) && (
+          <button onClick={isSpectator ? handleQuit : handleReturnToLobby}>
+            🚪 {isAnalysis ? '그만하기' : (isSpectator ? '나가기' : '대기실로')}
+          </button>
+        )}
+      </>
+    );
+  };
+
   return (
     <div className={styles.container}>
       {showVictory && finalResult && (
@@ -809,7 +850,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
           {gameState.isTimeout && <span className={styles.mate}>⏰ 시간초과!</span>}
           {gameState.isStalemate && <span className={styles.draw}>🤝 스테일메이트</span>}
           {gameState.winner && !gameState.isCheckmate && !gameState.isTimeout && (
-            <span className={styles.mate}>🏳️ {gameState.winner === 'w' ? '백' : '흑'} 승리 (기권)</span>
+            <span className={styles.mate}>🏳️ {gameState.resignedBy === 'w' ? '백' : (gameState.resignedBy === 'b' ? '흑' : (gameState.winner === 'b' ? '백' : '흑'))} 기권</span>
           )}
         </div>
       </div>
@@ -818,16 +859,6 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         {/* Left Sidebar: Hand / Summons */}
         <div className={styles.leftSidebar}>
           <div className={styles.sidebarSection}>
-            <h3>{isAnalysis || isSpectator ? (opponentColor === 'w' ? '백 기물' : '흑 기물') : '상대 기물'}</h3>
-            <Hand
-              pieces={opponentDeck}
-              color={opponentColor}
-              onSelect={handleHandSelect}
-              selectedPiece={gameState.turn === opponentColor ? selectedHandPiece : null}
-              disabled={isSpectator || (!isAnalysis) || (isAnalysis && gameState.turn !== opponentColor)}
-            />
-          </div>
-          <div className={styles.sidebarSection}>
             <h3>{isAnalysis || isSpectator ? (myColor === 'w' ? '백 기물' : '흑 기물') : '나의 기물'}</h3>
             <Hand
               pieces={myDeck}
@@ -835,6 +866,16 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
               onSelect={handleHandSelect}
               selectedPiece={gameState.turn === myColor ? selectedHandPiece : null}
               disabled={isSpectator || (isAnalysis && gameState.turn !== myColor)}
+            />
+          </div>
+          <div className={styles.sidebarSection}>
+            <h3>{isAnalysis || isSpectator ? (opponentColor === 'w' ? '백 기물' : '흑 기물') : '상대 기물'}</h3>
+            <Hand
+              pieces={opponentDeck}
+              color={opponentColor}
+              onSelect={handleHandSelect}
+              selectedPiece={gameState.turn === opponentColor ? selectedHandPiece : null}
+              disabled={isSpectator || (!isAnalysis) || (isAnalysis && gameState.turn !== opponentColor)}
             />
           </div>
         </div>
@@ -901,6 +942,12 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
             >
               ♟️ 기물
             </button>
+            <button
+              className={`${styles.tabButton} ${styles.mobileOnly} ${activeTab === 'menu' ? styles.activeTab : ''}`}
+              onClick={() => setActiveTab('menu')}
+            >
+              ⚙️ 기타
+            </button>
           </div>
 
           <div className={styles.tabContent}>
@@ -946,18 +993,8 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
                   <div ref={historyEndRef} />
                 </div>
               </div>
-            ) : (
+            ) : activeTab === 'hands' ? (
               <div className={styles.handTabContainer}>
-                <div className={styles.sidebarSection}>
-                  <h3>{isAnalysis || isSpectator ? (opponentColor === 'w' ? '백 기물' : '흑 기물') : '상대 기물'}</h3>
-                  <Hand
-                    pieces={opponentDeck}
-                    color={opponentColor}
-                    onSelect={handleHandSelect}
-                    selectedPiece={gameState.turn === opponentColor ? selectedHandPiece : null}
-                    disabled={isSpectator || (!isAnalysis) || (isAnalysis && gameState.turn !== opponentColor)}
-                  />
-                </div>
                 <div className={styles.sidebarSection}>
                   <h3>{isAnalysis || isSpectator ? (myColor === 'w' ? '백 기물' : '흑 기물') : '나의 기물'}</h3>
                   <Hand
@@ -968,6 +1005,22 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
                     disabled={isSpectator || (isAnalysis && gameState.turn !== myColor)}
                   />
                 </div>
+                <div className={styles.sidebarSection}>
+                  <h3>{isAnalysis || isSpectator ? (opponentColor === 'w' ? '백 기물' : '흑 기물') : '상대 기물'}</h3>
+                  <Hand
+                    pieces={opponentDeck}
+                    color={opponentColor}
+                    onSelect={handleHandSelect}
+                    selectedPiece={gameState.turn === opponentColor ? selectedHandPiece : null}
+                    disabled={isSpectator || (!isAnalysis) || (isAnalysis && gameState.turn !== opponentColor)}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className={styles.menuTabContainer}>
+                <div className={styles.mobileControls}>
+                  {renderControls()}
+                </div>
               </div>
             )}
           </div>
@@ -975,34 +1028,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       </div>
 
       <div className={styles.controls}>
-        {isAi && (
-          <button
-            className={showEvalBar ? styles.activeControl : ''}
-            onClick={() => setShowEvalBar(!showEvalBar)}
-          >
-            📊 평가 막대 {showEvalBar ? 'ON' : 'OFF'}
-          </button>
-        )}
-        {isAnalysis && (
-          <button
-            className={showVariations ? styles.activeControl : ''}
-            onClick={() => setShowVariations(!showVariations)}
-          >
-            📜 수순 보기 {showVariations ? 'ON' : 'OFF'}
-          </button>
-        )}
-        <button onClick={() => setMyColor(myColor === 'w' ? 'b' : 'w')}>🔄 보드 뒤집기</button>
-        {!isAnalysis && <button onClick={handleUndoRequest} disabled={!!gameState.undoRequest || gameState.history.length === 0}>↩️ 무르기</button>}
-        {isAnalysis && <button onClick={handleUndoRequest} disabled={gameState.history.length === 0}>↩️ 무르기</button>}
-        {!isAnalysis && <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/room/${gameId}`); alert('링크가 복사되었습니다!'); }}>📋 링크 공유</button>}
-        <button onClick={handleCopyNotation}>📝 기보 복사</button>
-        <button onClick={() => alert('🎮 조작 가이드\n\n• 왼쪽: 소환 가능한 기물 목록 (클릭 후 보드에 소환)\n• 중앙: 체스 보드 및 타이머\n• 오른쪽: 실시간 채팅\n• 프리무브: 상대 차례에 예약 가능')}>❓ 가이드</button>
-        {!isAnalysis && !gameState.winner && !isSpectator && <button className={styles.resignButton} onClick={handleResign}>🏳️ 기권</button>}
-        {(isAnalysis || gameState.winner || isSpectator) && (
-          <button onClick={isSpectator ? handleQuit : handleReturnToLobby}>
-            🚪 {isAnalysis ? '그만하기' : (isSpectator ? '나가기' : '대기실로')}
-          </button>
-        )}
+        {renderControls()}
       </div>
 
       {isAnalysis && (

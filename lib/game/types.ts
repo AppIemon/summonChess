@@ -37,6 +37,7 @@ export interface GameState {
     from: PieceColor;
     status: 'pending' | 'accepted' | 'declined';
   } | null;
+  resignedBy?: PieceColor | null;
 }
 
 export interface MoveAction {
