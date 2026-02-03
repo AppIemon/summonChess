@@ -38,6 +38,27 @@ export interface GameState {
     status: 'pending' | 'accepted' | 'declined';
   } | null;
   resignedBy?: PieceColor | null;
+  review?: GameReviewResults | null;
+}
+
+export type MoveClassification = 'brilliant' | 'great' | 'best' | 'excellent' | 'good' | 'inaccuracy' | 'mistake' | 'blunder';
+
+export interface MoveAnalysis {
+  move: string;
+  classification: MoveClassification;
+  evaluation: number;
+  bestMove: string;
+  accuracy: number; // 0-100
+  comment?: string;
+  color: PieceColor;
+  toSquare: string;
+}
+
+export interface GameReviewResults {
+  whiteAccuracy: number;
+  blackAccuracy: number;
+  moves: MoveAnalysis[];
+  fens: string[];
 }
 
 export interface MoveAction {

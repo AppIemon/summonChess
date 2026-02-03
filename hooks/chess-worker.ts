@@ -378,11 +378,17 @@ class AiGameState {
     let whiteMaterial = 0;
     let blackMaterial = 0;
 
+    const whiteKingPos = this.kingPos[0];
+    const blackKingPos = this.kingPos[1];
+    const wkX = whiteKingPos % 8, wkY = Math.floor(whiteKingPos / 8);
+    const bkX = blackKingPos % 8, bkY = Math.floor(blackKingPos / 8);
+
     for (let i = 0; i < 64; i++) {
-      if (this.board[i] === 0) continue;
-      const p = Math.abs(this.board[i]);
+      const pVal = this.board[i];
+      if (pVal === 0) continue;
+      const p = Math.abs(pVal);
       const x = i % 8, y = Math.floor(i / 8);
-      const side = this.board[i] > 0 ? WHITE : BLACK;
+      const side = pVal > 0 ? WHITE : BLACK;
 
       let v = PIECE_VALS[p];
 
@@ -395,27 +401,32 @@ class AiGameState {
       // Center control bonus
       v += CENTER_BONUS[i];
 
-      if (side === WHITE) whiteMaterial += v;
-      else blackMaterial += v;
+      // King proximity bonus (Pressure on enemy king)
+      if (side === WHITE) {
+        const dist = Math.max(Math.abs(x - bkX), Math.abs(y - bkY));
+        if (dist <= 2) v += (3 - dist) * 15;
+        whiteMaterial += v;
+      } else {
+        const dist = Math.max(Math.abs(x - wkX), Math.abs(y - wkY));
+        if (dist <= 2) v += (3 - dist) * 15;
+        blackMaterial += v;
+      }
     }
 
     score = whiteMaterial - blackMaterial;
 
-    // 2. Reserve Material - Slightly higher weight to encourage conservation
+    // 2. Reserve Material - Higher weight to encourage conservation
     for (let p = 1; p <= 5; p++) {
-      score += this.reserve[1][p] * PIECE_VALS[p] * 1.05;
-      score -= this.reserve[0][p] * PIECE_VALS[p] * 1.05;
+      score += this.reserve[1][p] * PIECE_VALS[p] * 1.08;
+      score -= this.reserve[0][p] * PIECE_VALS[p] * 1.08;
     }
 
-    // 3. Move logic penalty/bonus
-    // (Removed expensive mobility check)
-
-    // 4. Check & King Safety
+    // 3. Check & King Safety
     const whiteInCheck = this.isInCheck(WHITE);
     const blackInCheck = this.isInCheck(BLACK);
 
-    if (whiteInCheck) score -= 150;
-    if (blackInCheck) score += 150;
+    if (whiteInCheck) score -= 200;
+    if (blackInCheck) score += 200;
 
     return this.turn === WHITE ? score : -score;
   }
@@ -424,10 +435,21 @@ class AiGameState {
 const MATE_SCORE = 50000;
 
 function scoreMove(gs: AiGameState, m: Move, hashM: Move | null, killers: (Move | null)[]): number {
-  if (hashM && m.type === hashM.type && m.from === hashM.from && m.to === hashM.to && m.piece === hashM.piece) return 100000;
+  if (hashM && m.type === hashM.type && m.from === hashM.from && m.to === hashM.to && m.piece === hashM.piece) return 1000000;
 
   if (m.captured) {
-    return 10000 + (PIECE_VALS[Math.abs(m.captured)] * 10) - PIECE_VALS[m.piece];
+    return 100000 + (PIECE_VALS[Math.abs(m.captured)] * 10) - PIECE_VALS[m.piece];
+  }
+
+  // Bonus for summons near the opponent's king (Requested by user)
+  if (m.type === 'SUMMON') {
+    const oppKingPos = gs.kingPos[gs.turn === WHITE ? 1 : 0];
+    const kx = oppKingPos % 8, ky = Math.floor(oppKingPos / 8);
+    const tx = m.to % 8, ty = Math.floor(m.to / 8);
+    const dist = Math.max(Math.abs(tx - kx), Math.abs(ty - ky));
+    if (dist <= 1) return 90000 + PIECE_VALS[m.piece]; // Very high priority for adjacent summon
+    if (dist <= 2) return 80000 + PIECE_VALS[m.piece];
+    return 10000 + PIECE_VALS[m.piece];
   }
 
   for (let i = 0; i < killers.length; i++) {
@@ -437,8 +459,7 @@ function scoreMove(gs: AiGameState, m: Move, hashM: Move | null, killers: (Move 
     }
   }
 
-  if (m.promo) return 8000;
-  if (m.type === 'SUMMON') return 1000;
+  if (m.promo) return 9500;
   return 0;
 }
 
@@ -448,12 +469,7 @@ function quiescence(gs: AiGameState, alpha: number, beta: number): number {
   if (alpha < standPat) alpha = standPat;
 
   const moves = gs.generateMoves().filter(m => m.captured !== 0 || m.promo !== 0);
-  // Basic MVV/LVA for quiescence sorting
-  moves.sort((a, b) => {
-    const scoreA = a.captured ? (PIECE_VALS[Math.abs(a.captured)] * 10 - PIECE_VALS[a.piece]) : 0;
-    const scoreB = b.captured ? (PIECE_VALS[Math.abs(b.captured)] * 10 - PIECE_VALS[b.piece]) : 0;
-    return scoreB - scoreA;
-  });
+  moves.sort((a, b) => scoreMove(gs, b, null, [null, null]) - scoreMove(gs, a, null, [null, null]));
 
   for (const m of moves) {
     const prevState = gs.makeMove(m);
@@ -470,9 +486,9 @@ function quiescence(gs: AiGameState, alpha: number, beta: number): number {
   return alpha;
 }
 
-const killers: (Move | null)[][] = Array.from({ length: 20 }, () => [null, null]);
+const killers: (Move | null)[][] = Array.from({ length: 32 }, () => [null, null]);
 
-function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number): number {
+function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, extensionCount: number = 0): number {
   if (depth <= 0) return quiescence(gs, alpha, beta);
 
   const hashIdx = Number(gs.currentHash % BigInt(TT_SIZE));
@@ -487,13 +503,29 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number):
     hashMove = entry.bestMove;
   }
 
+  // Null Move Pruning
+  if (depth >= 3 && !gs.isInCheck(gs.turn) && extensionCount === 0) {
+    const prevState = {
+      ep: gs.epSquare,
+      hash: gs.currentHash,
+      turn: gs.turn
+    };
+    gs.turn *= -1;
+    gs.currentHash ^= zobristTurn;
+    gs.epSquare = -1;
+    const val = -alphaBeta(gs, depth - 3, -beta, -beta + 1, extensionCount);
+    gs.turn = prevState.turn;
+    gs.currentHash = prevState.hash;
+    gs.epSquare = prevState.ep;
+    if (val >= beta) return beta;
+  }
+
   const moves = gs.generateMoves();
   if (moves.length === 0) {
     if (gs.isInCheck(gs.turn)) return -MATE_SCORE - depth;
     return 0;
   }
 
-  // Sort moves using hash move and killers
   const layerKillers = killers[depth] || [null, null];
   moves.sort((a, b) => scoreMove(gs, b, hashMove, layerKillers) - scoreMove(gs, a, hashMove, layerKillers));
 
@@ -511,7 +543,15 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number):
     }
 
     moveCount++;
-    const val = -alphaBeta(gs, depth - 1, -beta, -alpha);
+
+    // Check Extension: If this move delivers a check, extend depth (limit 2 extensions)
+    let extension = 0;
+    const isCheck = gs.isInCheck(gs.turn);
+    if (isCheck && extensionCount < 2) {
+      extension = 1;
+    }
+
+    const val = -alphaBeta(gs, depth - 1 + extension, -beta, -alpha, extensionCount + extension);
     gs.undoMove(m, prevState);
 
     if (val > bestVal) {
@@ -520,8 +560,7 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number):
     }
     if (val >= beta) {
       TT[hashIdx] = { hash: gs.currentHash, depth, score: val, flag: TT_BETA, bestMove: m };
-      // Update killers
-      if (!m.captured) {
+      if (!m.captured && depth < 32) {
         killers[depth][1] = killers[depth][0];
         killers[depth][0] = m;
       }
@@ -564,7 +603,6 @@ function getPV(gs: AiGameState, depth: number): { move: Move, fen: string }[] {
     }
   }
 
-  // Undo moves to restore state
   for (let i = stateStack.length - 1; i >= 0; i--) {
     gs.undoMove(stateStack[i].move, stateStack[i].state);
   }
@@ -573,23 +611,25 @@ function getPV(gs: AiGameState, depth: number): { move: Move, fen: string }[] {
 }
 
 self.onmessage = (e) => {
-  const { fen } = e.data;
+  const { fen, depth: requestedDepth } = e.data;
   initZobrist();
-  console.log('AI starting search for FEN:', fen);
   const startTime = Date.now();
 
   const gs = new AiGameState();
   gs.loadFen(fen);
 
-  const maxDepth = 4;
+  const maxSearchDepth = requestedDepth || 6;
   let lastBestMove: Move | null = null;
   let finalVariations: any[] = [];
+  const MAX_TIME = 2500; // Hard time limit of 2.5 seconds per search
 
-  for (let d = 1; d <= maxDepth; d++) {
+  for (let d = 1; d <= maxSearchDepth; d++) {
+    const currentTime = Date.now();
+    if (d > 1 && currentTime - startTime > MAX_TIME * 0.6) break; // Don't start a new depth if we've used 60% of time
+
     const moves = gs.generateMoves();
     if (moves.length === 0) break;
 
-    // Use results from previous depth for ordering
     const hashIdx = Number(gs.currentHash % BigInt(TT_SIZE));
     const entry = TT[hashIdx];
     const hashM = entry?.bestMove || null;
@@ -598,6 +638,8 @@ self.onmessage = (e) => {
     const variations: { move: Move, evaluation: number, pv: Move[] }[] = [];
 
     for (const m of moves) {
+      if (d > 1 && Date.now() - startTime > MAX_TIME) break; // Inter-move time check
+
       const prevState = gs.makeMove(m);
       if (gs.isInCheck(gs.turn * -1)) {
         gs.undoMove(m, prevState);
@@ -614,15 +656,22 @@ self.onmessage = (e) => {
       });
     }
 
+    if (Date.now() - startTime > MAX_TIME && variations.length < moves.length) {
+      // If we timed out mid-depth, use the results if we have at least one or fallback
+    }
+
     variations.sort((a, b) => {
       if (gs.turn === 1) return b.evaluation - a.evaluation;
       return a.evaluation - b.evaluation;
     });
 
     if (variations.length > 0) {
-      // Pick one randomly from moves within 10 centipawns of the best move for variety
       const bestEval = variations[0].evaluation;
-      const threshold = 30; // Increased threshold for more variety in move selection
+
+      // If a mate is found, we can potentially stop or narrow down
+      const isWinningMate = (gs.turn === 1 && bestEval > MATE_SCORE - 100) || (gs.turn === -1 && bestEval < -MATE_SCORE + 100);
+
+      const threshold = isWinningMate ? 0 : 20; // NO variety if we found a mate! Use the fastest one.
       const topMoves = variations.filter(v =>
         gs.turn === 1
           ? v.evaluation >= bestEval - threshold
@@ -632,9 +681,9 @@ self.onmessage = (e) => {
       const randomIdx = Math.floor(Math.random() * topMoves.length);
       lastBestMove = topMoves[randomIdx].move;
       finalVariations = variations.slice(0, 5);
-    }
 
-    console.log(`Depth ${d} finished. Best move (randomized):`, lastBestMove);
+      if (isWinningMate && d >= 4) break; // If we found a mate at reasonable depth, stop
+    }
   }
 
   const topVariations = finalVariations;
@@ -651,18 +700,17 @@ self.onmessage = (e) => {
     return;
   }
 
-  // Resignation check
-  if (perspectiveMaxVal < -MATE_SCORE + 100) {
+  if (perspectiveMaxVal < -MATE_SCORE + 200) {
     self.postMessage({ type: 'RESIGN' });
   } else {
     self.postMessage({
       type: 'MOVE',
       move: bestM,
       evaluation: topVariations[0]?.evaluation,
-      depth: maxDepth,
+      depth: maxSearchDepth,
       variations: topVariations
     });
   }
 
-  console.log(`AI search finished in ${Date.now() - startTime}ms.`);
+  console.log(`AI search finished in ${Date.now() - startTime}ms. Final depth:`, finalVariations.length > 0 ? "..." : 0);
 };

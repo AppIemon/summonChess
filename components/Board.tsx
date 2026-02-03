@@ -13,6 +13,7 @@ interface BoardProps {
   lastMove?: { from: string; to: string } | null;
   isCheckmate?: boolean;
   premove?: { from: string; to?: string } | null;
+  annotations?: { [square: string]: { icon: string; color: string } } | null;
 }
 
 // FEN Parser helper
@@ -49,6 +50,7 @@ export default function Board({
   lastMove,
   isCheckmate = false,
   premove = null,
+  annotations = null,
 }: BoardProps) {
   const board = fenToBoard(fen);
 
@@ -115,6 +117,15 @@ export default function Board({
                   piece?.color === 'w' ? styles.pieceWhite : styles.pieceBlack
                 )}
               />
+            )}
+
+            {annotations && annotations[squareId] && (
+              <div
+                className={styles.reviewIcon}
+                style={{ backgroundColor: annotations[squareId].color }}
+              >
+                {annotations[squareId].icon}
+              </div>
             )}
           </div>
         );

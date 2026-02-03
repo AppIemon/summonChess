@@ -764,7 +764,7 @@
 
   .rightSidebar {
     width: 100%;
-    height: 500px;
+    height: 600px;
   }
 
   .mobileOnly {
@@ -773,7 +773,6 @@
 
   .controls {
     display: none !important;
-    /* Hide original controls on mobile since we have menu tab */
   }
 
   .mobileControls {
@@ -792,6 +791,235 @@
     border-radius: 12px;
     font-weight: 700;
   }
+}
+
+.reviewContainer {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+}
+
+.reviewHeader {
+  padding: 20px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.accuracyRow {
+  display: flex;
+  gap: 10px;
+}
+
+.accuracyBox {
+  flex: 1;
+  padding: 12px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.accuracyWhite {
+  background: white;
+  border: 1px solid #ddd;
+  color: #1a1a2e;
+}
+
+.accuracyBlack {
+  background: #1a1a2e;
+  border: 1px solid #333;
+  color: white;
+}
+
+.accuracyValue {
+  font-size: 1.5rem;
+  font-weight: 800;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.accuracyLabel {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.reviewProgress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 40px 20px;
+  align-items: center;
+  text-align: center;
+}
+
+.progressBar {
+  width: 100%;
+  height: 8px;
+  background: #eee;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.progressFill {
+  height: 100%;
+  background: #667eea;
+  transition: width 0.3s;
+}
+
+.reviewMoves {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: white;
+}
+
+.reviewMoveItem {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  gap: 12px;
+  border-bottom: 1px solid #f8f9fa;
+  cursor: pointer;
+  transition: all 0.2s;
+  border-left: 3px solid transparent;
+}
+
+.selectedReviewMove {
+  background: #f0f4ff !important;
+  border-left: 3px solid #667eea;
+}
+
+.reviewMoveItem:hover {
+  background: #f1f3f5;
+}
+
+.classificationIcon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  font-weight: 900;
+  flex-shrink: 0;
+}
+
+.icon_brilliant {
+  background: #1baca6;
+  color: white;
+}
+
+.icon_great {
+  background: #5c8bb0;
+  color: white;
+}
+
+.icon_best {
+  background: #95bb4a;
+  color: white;
+}
+
+.icon_excellent {
+  background: #96bc4b;
+  color: white;
+  opacity: 0.9;
+}
+
+.icon_good {
+  background: #96bc4b;
+  color: white;
+  opacity: 0.7;
+}
+
+.icon_inaccuracy {
+  background: #f0c15c;
+  color: white;
+}
+
+.icon_mistake {
+  background: #e6912c;
+  color: white;
+}
+
+.icon_blunder {
+  background: #b33430;
+  color: white;
+}
+
+.moveInfo {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.moveMain {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.moveName {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.moveClassLabel {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.moveComment {
+  font-size: 0.8rem;
+  color: #666;
+  margin-top: 2px;
+  line-height: 1.2;
+}
+
+.reviewStartArea {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  gap: 20px;
+  text-align: center;
+}
+
+.reviewStartBtn {
+  width: 100%;
+  max-width: 200px;
+  padding: 14px 24px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 1rem;
+}
+
+.reviewStartBtn:hover {
+  background: #5a6fd1;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.reviewPlaceholder {
+  color: #aaa;
+  font-size: 0.9rem;
 }
 
 .menuTabContainer {

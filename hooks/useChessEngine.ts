@@ -18,7 +18,7 @@ export const useChessEngine = () => {
     }
   }, []);
 
-  const getBestMove = async (fen: string, isAiVsAi: boolean = false): Promise<{ type: 'MOVE' | 'RESIGN'; move?: any; evaluation?: number; depth?: number; variations?: any[] }> => {
+  const getBestMove = async (fen: string, isAiVsAi: boolean = false, depth?: number): Promise<{ type: 'MOVE' | 'RESIGN'; move?: any; evaluation?: number; depth?: number; variations?: any[] }> => {
     // 1. Check MongoDB Cache
     try {
       // Occasionally skip cache for variety/exploration
@@ -26,7 +26,7 @@ export const useChessEngine = () => {
       const skipChance = isAiVsAi ? 0.3 : 0.1;
       const skipCache = Math.random() < skipChance;
 
-      if (!skipCache) {
+      if (!skipCache && !depth) { // Don't use cache if custom depth is requested
         const resp = await fetch(`/api/ai/best-move?fen=${encodeURIComponent(fen)}`);
         if (resp.ok) {
           const data = await resp.json();
@@ -60,8 +60,8 @@ export const useChessEngine = () => {
         workerRef.current?.removeEventListener('message', handleMessage);
         const result = e.data;
 
-        // 3. Save to MongoDB for future use
-        if (result.type === 'MOVE' && result.move) {
+        // 3. Save to MongoDB for future use (only if using default depth)
+        if (!depth && result.type === 'MOVE' && result.move) {
           try {
             fetch('/api/ai/best-move', {
               method: 'POST',
@@ -82,7 +82,7 @@ export const useChessEngine = () => {
       };
 
       workerRef.current.addEventListener('message', handleMessage);
-      workerRef.current.postMessage({ fen });
+      workerRef.current.postMessage({ fen, depth });
     });
   };
 
