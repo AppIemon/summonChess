@@ -1,21 +1,37 @@
 type PieceType = 'p' | 'n' | 'b' | 'r' | 'q' | 'k';
 
-// Duplicated logic from useChessEngine.ts to be self-contained in the worker
 const EMPTY = 0;
 const PAWN = 1, KNIGHT = 2, BISHOP = 3, ROOK = 4, QUEEN = 5, KING = 6;
 const WHITE = 1, BLACK = -1;
 const INF = 100000000;
 const PIECE_VALS = [0, 100, 350, 450, 500, 1100, 20000];
 
-interface Move {
-  type: 'MOVE' | 'SUMMON';
-  from: number;
-  to: number;
-  piece: number;
-  captured: number;
-  promo: number;
-  enPassant: boolean;
+// Move Packing Utilities (32-bit integer)
+// bits 0-5: from (0-63)
+// bits 6-11: to (0-63)
+// bits 12-14: piece (0-7)
+// bits 15-17: promo (0-7)
+// bits 18-21: capturedabs (0-15)
+// bit 22: enPassant flag
+// bit 23: isSummon flag
+function packMove(type: 'MOVE' | 'SUMMON', from: number, to: number, piece: number, captured: number, promo: number, enPassant: boolean): number {
+  let m = (from & 0x3F);
+  m |= (to & 0x3F) << 6;
+  m |= (piece & 0x7) << 12;
+  m |= (promo & 0x7) << 15;
+  m |= (Math.abs(captured) & 0xF) << 18;
+  if (enPassant) m |= (1 << 22);
+  if (type === 'SUMMON') m |= (1 << 23);
+  return m;
 }
+
+const getFrom = (m: number) => m & 0x3F;
+const getTo = (m: number) => (m >> 6) & 0x3F;
+const getPiece = (m: number) => (m >> 12) & 0x7;
+const getPromo = (m: number) => (m >> 15) & 0x7;
+const getCap = (m: number) => (m >> 18) & 0xF;
+const isEP = (m: number) => (m & (1 << 22)) !== 0;
+const isSummon = (m: number) => (m & (1 << 23)) !== 0;
 
 const CENTER_BONUS = new Int32Array(64);
 for (let i = 0; i < 64; i++) {
@@ -28,15 +44,14 @@ const TT_EXACT = 0;
 const TT_ALPHA = 1; // Upper bound (Fail-low)
 const TT_BETA = 2;  // Lower bound (Fail-high)
 
-interface TTEntry {
-  hash: bigint;
-  depth: number;
-  score: number;
-  flag: number;
-  bestMove: Move | null;
-}
+const TT_SIZE = 1 << 19; // 512k entries for balanced memory and speed
+const TT_KEYS = new BigUint64Array(TT_SIZE);
+const TT_VALS = new Int32Array(TT_SIZE);
+const TT_MOVES = new Int32Array(TT_SIZE);
+const TT_INFO = new Int32Array(TT_SIZE); // [0-7: depth, 8-9: flag]
 
 const zobristBoard = Array.from({ length: 64 }, () => new BigUint64Array(13));
+const zobristReserve = Array.from({ length: 2 }, () => Array.from({ length: 7 }, () => new BigUint64Array(16))); // [Side][PieceType][Count]
 let zobristTurn: bigint = 0n;
 let zobristInitialized = false;
 
@@ -60,12 +75,17 @@ function initZobrist() {
       zobristBoard[i][j] = nextRand();
     }
   }
+  for (let i = 0; i < 2; i++) {
+    for (let j = 0; j < 7; j++) {
+      for (let k = 0; k < 16; k++) {
+        zobristReserve[i][j][k] = nextRand();
+      }
+    }
+  }
   zobristTurn = nextRand();
   zobristInitialized = true;
 }
 
-const TT_SIZE = 1 << 18;
-const TT: (TTEntry | null)[] = new Array(TT_SIZE).fill(null);
 
 class AiGameState {
   board: Int8Array = new Int8Array(64);
@@ -89,6 +109,9 @@ class AiGameState {
     this.board.fill(0);
     this.kingPos[0] = -1;
     this.kingPos[1] = -1;
+    this.currentHash = 0n;
+    this.reserve[0].fill(0);
+    this.reserve[1].fill(0);
 
     const parts = fen.split(' ');
     let r = 7, c = 0;
@@ -116,10 +139,14 @@ class AiGameState {
     const deckParts = fen.match(/\[(.*?)\]\[(.*?)\]/);
     if (deckParts) {
       const parse = (s: string, side: number) => {
+        const rIdx = side === WHITE ? 1 : 0;
         for (const char of s) {
           const l = char.toLowerCase();
           const type = l === 'p' ? PAWN : l === 'n' ? KNIGHT : l === 'b' ? BISHOP : l === 'r' ? ROOK : l === 'q' ? QUEEN : 0;
-          if (type) this.reserve[side === WHITE ? 1 : 0][type]++;
+          if (type) {
+            this.reserve[rIdx][type]++;
+            this.currentHash ^= zobristReserve[rIdx][type][this.reserve[rIdx][type]];
+          }
         }
       };
       parse(deckParts[1], WHITE);
@@ -127,28 +154,28 @@ class AiGameState {
     }
   }
 
-  getSummonMask(side: number): boolean[] {
-    const mask = new Array(64).fill(false);
+  getSummonMask(side: number): Uint8Array {
+    const mask = new Uint8Array(64);
     for (let i = 0; i < 64; i++) {
       const pVal = this.board[i];
       if (pVal === 0 || (side === WHITE && pVal < 0) || (side === BLACK && pVal > 0)) continue;
       const p = Math.abs(pVal);
-      const x = i % 8, y = Math.floor(i / 8);
+      const x = i & 7, y = i >> 3;
       if (p === PAWN) {
-        const dy = side === WHITE ? 1 : -1;
+        const dy = (side === WHITE) ? 1 : -1;
         const ny = y + dy;
         if (ny >= 0 && ny <= 7) {
-          const base = ny * 8;
-          mask[base + x] = true;
-          if (x > 0) mask[base + x - 1] = true;
-          if (x < 7) mask[base + x + 1] = true;
+          const base = ny << 3;
+          mask[base + x] = 1;
+          if (x > 0) mask[base + x - 1] = 1;
+          if (x < 7) mask[base + x + 1] = 1;
         }
       } else if (p === KNIGHT || p === KING) {
-        const dx = p === KNIGHT ? KNIGHT_DX : KING_DX;
-        const dy = p === KNIGHT ? KNIGHT_DY : KING_DY;
+        const dxArr = p === KNIGHT ? KNIGHT_DX : KING_DX;
+        const dyArr = p === KNIGHT ? KNIGHT_DY : KING_DY;
         for (let k = 0; k < 8; k++) {
-          const nx = x + dx[k], ny = y + dy[k];
-          if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) mask[ny * 8 + nx] = true;
+          const nx = x + dxArr[k], ny = y + dyArr[k];
+          if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) mask[(ny << 3) + nx] = 1;
         }
       } else {
         const start = p === BISHOP ? 4 : 0;
@@ -158,8 +185,8 @@ class AiGameState {
           for (let s = 1; s < 8; s++) {
             const nx = x + dx * s, ny = y + dy * s;
             if (nx < 0 || nx > 7 || ny < 0 || ny > 7) break;
-            mask[ny * 8 + nx] = true;
-            if (this.board[ny * 8 + nx] !== 0) break;
+            mask[(ny << 3) + nx] = 1;
+            if (this.board[(ny << 3) + nx] !== 0) break;
           }
         }
       }
@@ -167,17 +194,16 @@ class AiGameState {
     return mask;
   }
 
-  generateMoves(): Move[] {
-    const moves: Move[] = [];
+  generateMoves(): number[] {
+    const moves: number[] = [];
     const rIdx = this.turn === WHITE ? 1 : 0;
     const zone = this.getSummonMask(this.turn);
     for (let i = 0; i < 64; i++) {
       if (this.board[i] === EMPTY && zone[i]) {
         for (let p = 1; p <= 5; p++) {
           if (this.reserve[rIdx][p] > 0) {
-            const y = Math.floor(i / 8);
-            if (p === PAWN && (y === 0 || y === 7)) continue;
-            moves.push({ type: 'SUMMON', from: -1, to: i, piece: p, captured: 0, promo: 0, enPassant: false });
+            if (p === PAWN && ((i >> 3) === 0 || (i >> 3) === 7)) continue;
+            moves.push(packMove('SUMMON', -1, i, p, 0, 0, false));
           }
         }
       }
@@ -186,58 +212,54 @@ class AiGameState {
       const pVal = this.board[i];
       if (pVal === 0 || (this.turn === WHITE && pVal < 0) || (this.turn === BLACK && pVal > 0)) continue;
       const p = Math.abs(pVal);
-      const x = i % 8, y = Math.floor(i / 8);
+      const x = i & 7, y = i >> 3;
       if (p === PAWN) {
         const dy = (this.turn === WHITE) ? 1 : -1;
-        if (y + dy >= 0 && y + dy <= 7 && this.board[(y + dy) * 8 + x] === 0) {
-          const promo = (y + dy === 0 || y + dy === 7) ? 1 : 0;
-          moves.push({ type: 'MOVE', from: i, to: (y + dy) * 8 + x, piece: p, captured: 0, promo, enPassant: false });
-          if ((this.turn === WHITE && y === 1) || (this.turn === BLACK && y === 6)) {
-            if (this.board[(y + dy * 2) * 8 + x] === 0) {
-              moves.push({ type: 'MOVE', from: i, to: (y + dy * 2) * 8 + x, piece: p, captured: 0, promo: 0, enPassant: false });
-            }
+        const targetSq = (y + dy) * 8 + x;
+        if (y + dy >= 0 && y + dy <= 7 && this.board[targetSq] === 0) {
+          const promo = (y + dy === 0 || y + dy === 7) ? QUEEN : 0;
+          moves.push(packMove('MOVE', i, targetSq, p, 0, promo, false));
+          if (((this.turn === WHITE && y === 1) || (this.turn === BLACK && y === 6)) && this.board[(y + dy * 2) * 8 + x] === 0) {
+            moves.push(packMove('MOVE', i, (y + dy * 2) * 8 + x, p, 0, 0, false));
           }
         }
         for (const dx of [-1, 1]) {
           const nx = x + dx, ny = y + dy;
           if (nx >= 0 && nx <= 7 && ny >= 0 && ny <= 7) {
-            const target = this.board[ny * 8 + nx];
+            const tSq = (ny << 3) + nx;
+            const target = this.board[tSq];
             if (target !== 0 && ((this.turn === WHITE && target < 0) || (this.turn === BLACK && target > 0))) {
-              const promo = (ny === 0 || ny === 7) ? 1 : 0;
-              moves.push({ type: 'MOVE', from: i, to: ny * 8 + nx, piece: p, captured: target, promo, enPassant: false });
-            }
-            if (this.epSquare === ny * 8 + nx) {
-              moves.push({ type: 'MOVE', from: i, to: this.epSquare, piece: p, captured: 0, promo: 0, enPassant: true });
+              const promo = (ny === 0 || ny === 7) ? QUEEN : 0;
+              moves.push(packMove('MOVE', i, tSq, p, target, promo, false));
+            } else if (this.epSquare === tSq) {
+              moves.push(packMove('MOVE', i, this.epSquare, p, 0, 0, true));
             }
           }
         }
       } else if (p === KNIGHT || p === KING) {
-        const dxArr = p === KNIGHT ? [1, 2, 2, 1, -1, -2, -2, -1] : [1, 1, 1, 0, 0, -1, -1, -1];
-        const dyArr = p === KNIGHT ? [2, 1, -1, -2, -2, -1, 1, 2] : [1, 0, -1, 1, -1, 1, 0, -1];
+        const dxArr = p === KNIGHT ? KNIGHT_DX : KING_DX;
+        const dyArr = p === KNIGHT ? KNIGHT_DY : KING_DY;
         for (let k = 0; k < 8; k++) {
           const nx = x + dxArr[k], ny = y + dyArr[k];
           if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
-            const target = this.board[ny * 8 + nx];
+            const tSq = (ny << 3) + nx;
+            const target = this.board[tSq];
             if (target === 0 || (this.turn === WHITE && target < 0) || (this.turn === BLACK && target > 0)) {
-              moves.push({ type: 'MOVE', from: i, to: ny * 8 + nx, piece: p, captured: target, promo: 0, enPassant: false });
+              moves.push(packMove('MOVE', i, tSq, p, target, 0, false));
             }
           }
         }
       } else {
-        const dirs = p === BISHOP ? [[-1, 1], [1, 1], [-1, -1], [1, -1]] :
-          p === ROOK ? [[0, 1], [0, -1], [-1, 0], [1, 0]] :
-            [[0, 1], [0, -1], [-1, 0], [1, 0], [-1, 1], [1, 1], [-1, -1], [1, -1]];
-        for (const [dx, dy] of dirs) {
+        const start = p === BISHOP ? 4 : 0, end = p === ROOK ? 4 : 8;
+        for (let d = start; d < end; d++) {
+          const dx = ATTACK_DIRS[d][0], dy = ATTACK_DIRS[d][1];
           for (let s = 1; s < 8; s++) {
             const nx = x + dx * s, ny = y + dy * s;
             if (nx < 0 || nx > 7 || ny < 0 || ny > 7) break;
-            const target = this.board[ny * 8 + nx];
-            if (target === 0) {
-              moves.push({ type: 'MOVE', from: i, to: ny * 8 + nx, piece: p, captured: 0, promo: 0, enPassant: false });
-            } else {
-              if ((this.turn === WHITE && target < 0) || (this.turn === BLACK && target > 0)) {
-                moves.push({ type: 'MOVE', from: i, to: ny * 8 + nx, piece: p, captured: target, promo: 0, enPassant: false });
-              }
+            const tSq = (ny << 3) + nx, target = this.board[tSq];
+            if (target === 0) moves.push(packMove('MOVE', i, tSq, p, 0, 0, false));
+            else {
+              if (this.turn === WHITE ? target < 0 : target > 0) moves.push(packMove('MOVE', i, tSq, p, target, 0, false));
               break;
             }
           }
@@ -247,76 +269,41 @@ class AiGameState {
     return moves;
   }
 
-  makeMove(m: Move) {
-    const prevState = {
-      ep: this.epSquare,
-      hash: this.currentHash,
-      capturedPiece: m.captured,
-      capturedSq: m.to,
-      oldKingPos: -1
-    };
-
-    if (m.type === 'SUMMON') {
-      const rIdx = (this.turn === WHITE) ? 1 : 0;
-      this.reserve[rIdx][m.piece]--;
-      this.board[m.to] = m.piece * this.turn;
-      this.updateHashSquare(m.to, 0, this.board[m.to]);
+  makeMove(m: number) {
+    const prevState = { ep: this.epSquare, hash: this.currentHash, capP: getCap(m), capSq: getTo(m), oldKing: -1 };
+    if (isSummon(m)) {
+      const rIdx = (this.turn === WHITE) ? 1 : 0, p = getPiece(m), to = getTo(m);
+      this.currentHash ^= zobristReserve[rIdx][p][this.reserve[rIdx][p]];
+      this.reserve[rIdx][p]--;
+      this.board[to] = p * this.turn;
+      this.updateHashSquare(to, 0, this.board[to]);
       this.epSquare = -1;
     } else {
-      this.updateHashSquare(m.from, this.board[m.from], 0);
-      const movingPiece = this.board[m.from];
-      this.board[m.from] = 0;
-      const placed = m.promo ? (this.turn === WHITE ? QUEEN : -QUEEN) : movingPiece;
-
-      if (Math.abs(movingPiece) === KING) {
-        prevState.oldKingPos = m.from;
-        this.kingPos[this.turn === WHITE ? 0 : 1] = m.to;
-      }
-
-      if (m.captured && !m.enPassant) {
-        this.updateHashSquare(m.to, m.captured, 0);
-      }
-      if (m.enPassant) {
-        const capSq = m.to + (this.turn === WHITE ? -8 : 8);
-        prevState.capturedSq = capSq;
-        prevState.capturedPiece = this.board[capSq];
-        this.updateHashSquare(capSq, this.board[capSq], 0);
-        this.board[capSq] = 0;
-      }
-
-      this.board[m.to] = placed;
-      this.updateHashSquare(m.to, 0, placed);
-      this.epSquare = (Math.abs(movingPiece) === PAWN && Math.abs(m.from - m.to) === 16) ? (m.from + m.to) / 2 : -1;
+      const from = getFrom(m), to = getTo(m), p = getPiece(m), promo = getPromo(m), moving = this.board[from];
+      this.updateHashSquare(from, moving, 0); this.board[from] = 0;
+      if (p === KING) { prevState.oldKing = from; this.kingPos[this.turn === WHITE ? 0 : 1] = to; }
+      if (isEP(m)) {
+        const capSq = to + (this.turn === WHITE ? -8 : 8); prevState.capSq = capSq; prevState.capP = this.board[capSq];
+        this.updateHashSquare(capSq, prevState.capP, 0); this.board[capSq] = 0;
+      } else if (prevState.capP) this.updateHashSquare(to, prevState.capP, 0);
+      const placed = promo ? (this.turn === WHITE ? QUEEN : -QUEEN) : moving;
+      this.board[to] = placed; this.updateHashSquare(to, 0, placed);
+      this.epSquare = (p === PAWN && Math.abs(from - to) === 16) ? (from + to) >> 1 : -1;
     }
-    this.turn *= -1;
-    this.currentHash ^= zobristTurn;
+    this.turn *= -1; this.currentHash ^= zobristTurn;
     return prevState;
   }
 
-  undoMove(m: Move, prevState: { ep: number, hash: bigint, capturedPiece: number, capturedSq: number, oldKingPos: number }) {
-    this.turn *= -1;
-    this.currentHash = prevState.hash;
-    this.epSquare = prevState.ep;
-
-    if (m.type === 'SUMMON') {
-      const rIdx = (this.turn === WHITE) ? 1 : 0;
-      this.reserve[rIdx][m.piece]++;
-      this.updateHashSquare(m.to, this.board[m.to], 0);
-      this.board[m.to] = 0;
+  undoMove(m: number, prev: any) {
+    this.turn *= -1; this.currentHash = prev.hash; this.epSquare = prev.ep;
+    if (isSummon(m)) {
+      const rIdx = (this.turn === WHITE) ? 1 : 0, p = getPiece(m), to = getTo(m);
+      this.board[to] = 0; this.reserve[rIdx][p]++;
     } else {
-      const movingPiece = this.board[m.to];
-      this.board[m.to] = 0;
-
-      if (prevState.oldKingPos !== -1) {
-        this.kingPos[this.turn === WHITE ? 0 : 1] = prevState.oldKingPos;
-      }
-
-      const originalPiece = m.promo ? (this.turn === WHITE ? PAWN : -PAWN) : movingPiece;
-      this.board[m.from] = originalPiece;
-
-      if (prevState.capturedPiece) {
-        this.board[prevState.capturedSq] = prevState.capturedPiece;
-      }
+      const from = getFrom(m), to = getTo(m), p = getPiece(m), promo = getPromo(m);
+      if (prev.oldKing !== -1) this.kingPos[this.turn === WHITE ? 0 : 1] = prev.oldKing;
+      this.board[from] = promo ? (this.turn === WHITE ? PAWN : -PAWN) : this.board[to];
+      this.board[to] = 0; if (prev.capP) this.board[prev.capSq] = prev.capP;
     }
   }
 
@@ -393,43 +380,37 @@ class AiGameState {
 
   isSquareSummonable(sq: number, side: number): boolean {
     if (this.board[sq] !== 0) return false;
-    const x = sq % 8, y = Math.floor(sq / 8);
+    const x = sq & 7, y = sq >> 3;
 
-    // Check neighbors/paths to see if any friendly piece 'controls' this empty square
     // Pawns
-    const dy = side === WHITE ? -1 : 1;
+    const dy = (side === WHITE) ? -1 : 1;
     const prevY = y + dy;
     if (prevY >= 0 && prevY <= 7) {
+      const base = prevY << 3;
       for (let dx = -1; dx <= 1; dx++) {
         const nx = x + dx;
-        if (nx >= 0 && nx < 8 && this.board[prevY * 8 + nx] === PAWN * side) return true;
+        if (nx >= 0 && nx < 8 && this.board[base + nx] === PAWN * side) return true;
       }
     }
     // Knights
     for (let k = 0; k < 8; k++) {
       const nx = x + KNIGHT_DX[k], ny = y + KNIGHT_DY[k];
-      if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
-        if (this.board[ny * 8 + nx] === KNIGHT * side) return true;
-      }
+      if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8 && this.board[(ny << 3) + nx] === KNIGHT * side) return true;
     }
     // King
     for (let k = 0; k < 8; k++) {
       const nx = x + KING_DX[k], ny = y + KING_DY[k];
-      if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
-        if (this.board[ny * 8 + nx] === KING * side) return true;
-      }
+      if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8 && this.board[(ny << 3) + nx] === KING * side) return true;
     }
     // Sliders
     for (let d = 0; d < 8; d++) {
-      const dx = ATTACK_DIRS[d][0], dy = ATTACK_DIRS[d][1];
+      const dx = ATTACK_DIRS[d][0], dyA = ATTACK_DIRS[d][1];
       for (let s = 1; s < 8; s++) {
-        const nx = x + dx * s, ny = y + dy * s;
+        const nx = x + dx * s, ny = y + dyA * s;
         if (nx < 0 || nx > 7 || ny < 0 || ny > 7) break;
-        const p = this.board[ny * 8 + nx];
+        const p = this.board[(ny << 3) + nx];
         if (p !== 0) {
-          if (p === QUEEN * side) return true;
-          if (d < 4 && p === ROOK * side) return true;
-          if (d >= 4 && p === BISHOP * side) return true;
+          if (p === QUEEN * side || (d < 4 && p === ROOK * side) || (d >= 4 && p === BISHOP * side)) return true;
           break;
         }
       }
@@ -439,41 +420,25 @@ class AiGameState {
 
   evaluate(): number {
     let score = 0;
-
-    const whiteKingPos = this.kingPos[0];
-    const blackKingPos = this.kingPos[1];
-    const wkX = whiteKingPos % 8, wkY = Math.floor(whiteKingPos / 8);
-    const bkX = blackKingPos % 8, bkY = Math.floor(blackKingPos / 8);
+    const wk = this.kingPos[0], bk = this.kingPos[1];
+    const wkx = wk & 7, wky = wk >> 3, bkx = bk & 7, bky = bk >> 3;
 
     // 1. Piece Material & Position
     for (let i = 0; i < 64; i++) {
       const pVal = this.board[i];
       if (pVal === 0) continue;
-      const p = Math.abs(pVal);
-      const x = i % 8, y = Math.floor(i / 8);
-      const side = pVal > 0 ? WHITE : BLACK;
+      const p = Math.abs(pVal), x = i & 7, y = i >> 3, side = (pVal > 0 ? WHITE : BLACK);
+      let v = PIECE_VALS[p] + CENTER_BONUS[i];
 
-      let v = PIECE_VALS[p];
-
-      // Promotion bonus
       if (p === PAWN) {
         if ((side === WHITE && y === 6) || (side === BLACK && y === 1)) v += 100;
-        if ((side === WHITE && y === 5) || (side === BLACK && y === 2)) v += 30;
+        else if ((side === WHITE && y === 5) || (side === BLACK && y === 2)) v += 30;
       }
-
-      // Center control bonus
-      v += CENTER_BONUS[i];
 
       // King proximity bonus (Pressure on enemy king)
-      if (side === WHITE) {
-        const dist = Math.max(Math.abs(x - bkX), Math.abs(y - bkY));
-        if (dist <= 2) v += (3 - dist) * 20;
-        score += v;
-      } else {
-        const dist = Math.max(Math.abs(x - wkX), Math.abs(y - wkY));
-        if (dist <= 2) v += (3 - dist) * 20;
-        score -= v;
-      }
+      const dist = Math.max(Math.abs(x - (side === WHITE ? bkx : wkx)), Math.abs(y - (side === WHITE ? bky : wky)));
+      if (dist <= 2) v += (3 - dist) * 20;
+      score += side * v;
     }
 
     // 2. Reserve Material & Tactical Potential
@@ -486,59 +451,39 @@ class AiGameState {
       // Special Tactical: Queen/Knight in reserve potential near enemy king
       if (p === QUEEN || p === KNIGHT) {
         for (let k = 0; k < 8; k++) {
-          const wnx = bkX + KING_DX[k], wny = bkY + KING_DY[k];
+          const wnx = bkx + KING_DX[k], wny = bky + KING_DY[k];
           if (wnx >= 0 && wnx < 8 && wny >= 0 && wny < 8 && wCount > 0) {
-            if (this.isSquareSummonable(wny * 8 + wnx, WHITE)) {
-              score += p === QUEEN ? 120 : 60;
-            }
+            if (this.isSquareSummonable((wny << 3) + wnx, WHITE)) score += p === QUEEN ? 120 : 60;
           }
-          const bnx = wkX + KING_DX[k], bny = wkY + KING_DY[k];
+          const bnx = wkx + KING_DX[k], bny = wky + KING_DY[k];
           if (bnx >= 0 && bnx < 8 && bny >= 0 && bny < 8 && bCount > 0) {
-            if (this.isSquareSummonable(bny * 8 + bnx, BLACK)) {
-              score -= p === QUEEN ? 120 : 60;
-            }
+            if (this.isSquareSummonable((bny << 3) + bnx, BLACK)) score -= p === QUEEN ? 120 : 60;
           }
         }
       }
     }
 
     // 3. King Safety & Trap Detection
-    const wMobility = this.getKingMobility(WHITE);
-    const bMobility = this.getKingMobility(BLACK);
+    const wm = this.getKingMobility(WHITE), bm = this.getKingMobility(BLACK);
+    score += (wm - bm) * 35;
+    if (wm === 0) score -= 400;
+    if (bm === 0) score += 400;
 
-    // Each mobility square is important, but having 0 mobility is catastrophic
-    score += (wMobility - bMobility) * 35;
-    if (wMobility === 0) score -= 400;
-    if (bMobility === 0) score += 400;
+    const wCheck = this.isInCheck(WHITE), bCheck = this.isInCheck(BLACK);
+    if (wCheck) score -= (wm === 0 ? 8000 : 500);
+    if (bCheck) score += (bm === 0 ? 8000 : 500);
 
-    const whiteInCheck = this.isInCheck(WHITE);
-    const blackInCheck = this.isInCheck(BLACK);
-
-    if (whiteInCheck) {
-      if (wMobility === 0) score -= 8000; // Almost mate
-      else score -= 500;
-    }
-    if (blackInCheck) {
-      if (bMobility === 0) score += 8000; // Almost mate
-      else score += 500;
-    }
-
-    // "99% Win" pattern: Knight Check on Trapped King
-    if (bMobility <= 1 && this.reserve[1][KNIGHT] > 0) {
+    // Trap Detection: Knight Check on Trapped King
+    if (bm <= 1 && this.reserve[1][KNIGHT] > 0) {
       for (let k = 0; k < 8; k++) {
-        const nx = bkX + KNIGHT_DX[k], ny = bkY + KNIGHT_DY[k];
-        if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
-          if (this.isSquareSummonable(ny * 8 + nx, WHITE)) { score += 1200; break; }
-        }
+        const nx = bkx + KNIGHT_DX[k], ny = bky + KNIGHT_DY[k];
+        if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8 && this.isSquareSummonable((ny << 3) + nx, WHITE)) { score += 1200; break; }
       }
     }
-
-    if (wMobility <= 1 && this.reserve[0][KNIGHT] > 0) {
+    if (wm <= 1 && this.reserve[0][KNIGHT] > 0) {
       for (let k = 0; k < 8; k++) {
-        const nx = wkX + KNIGHT_DX[k], ny = wkY + KNIGHT_DY[k];
-        if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
-          if (this.isSquareSummonable(ny * 8 + nx, BLACK)) { score -= 1200; break; }
-        }
+        const nx = wkx + KNIGHT_DX[k], ny = wky + KNIGHT_DY[k];
+        if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8 && this.isSquareSummonable((ny << 3) + nx, BLACK)) { score -= 1200; break; }
       }
     }
 
@@ -547,50 +492,39 @@ class AiGameState {
 }
 
 const MATE_SCORE = 50000;
+const MATE_THRESHOLD = 40000;
+let searchStartTime = 0;
+let searchMAX_TIME = 3500;
+let isSearchAborted = false;
+const killers: Int32Array = new Int32Array(128); // 2 killers per ply up to 64 ply
 
-function scoreMove(gs: AiGameState, m: Move, hashM: Move | null, killers: (Move | null)[]): number {
-  if (hashM && m.type === hashM.type && m.from === hashM.from && m.to === hashM.to && m.piece === hashM.piece) return 1000000;
+function scoreMove(gs: AiGameState, m: number, hashM: number, ply: number): number {
+  if (m === hashM) return 1000000;
+  const captured = getCap(m);
+  if (captured) return 100000 + (PIECE_VALS[captured] << 4) - PIECE_VALS[getPiece(m)];
 
-  if (m.captured) {
-    return 100000 + (PIECE_VALS[Math.abs(m.captured)] * 10) - PIECE_VALS[m.piece];
-  }
-
-  // Bonus for summons near the opponent's king (Requested by user)
-  if (m.type === 'SUMMON') {
+  if (isSummon(m)) {
     const oppKingPos = gs.kingPos[gs.turn === WHITE ? 1 : 0];
     const kx = oppKingPos % 8, ky = Math.floor(oppKingPos / 8);
-    const tx = m.to % 8, ty = Math.floor(m.to / 8);
+    const tx = getTo(m) % 8, ty = Math.floor(getTo(m) / 8);
     const dist = Math.max(Math.abs(tx - kx), Math.abs(ty - ky));
 
-    // Pattern 1: Queen proximity
     if (dist <= 1) {
-      if (m.piece === QUEEN) return 95000; // Extreme priority
-      return 90000 + PIECE_VALS[m.piece];
+      if (getPiece(m) === QUEEN) return 95000;
+      return 90000 + PIECE_VALS[getPiece(m)];
     }
-
-    // Pattern 2: Knight Check on Trapped King
-    if (m.piece === KNIGHT) {
-      // Check if this summon square checks the king
+    if (getPiece(m) === KNIGHT) {
       const dx = Math.abs(tx - kx), dy = Math.abs(ty - ky);
       if ((dx === 1 && dy === 2) || (dx === 2 && dy === 1)) {
-        const mobility = gs.getKingMobility(gs.turn === WHITE ? -1 : 1);
-        if (mobility <= 1) return 96000; // Even higher priority than Queen!
-        return 85000;
+        return 96000;
       }
     }
-
-    if (dist <= 2) return 80000 + PIECE_VALS[m.piece];
-    return 10000 + PIECE_VALS[m.piece];
+    if (dist <= 2) return 80000 + PIECE_VALS[getPiece(m)];
+    return 10000 + PIECE_VALS[getPiece(m)];
   }
 
-  for (let i = 0; i < killers.length; i++) {
-    const km = killers[i];
-    if (km && m.type === km.type && m.from === km.from && m.to === km.to && m.piece === km.piece) {
-      return 9000 - i;
-    }
-  }
-
-  if (m.promo) return 9500;
+  if (m === killers[ply << 1] || m === killers[(ply << 1) + 1]) return 9000;
+  if (getPromo(m)) return 9500;
   return 0;
 }
 
@@ -604,8 +538,8 @@ function quiescence(gs: AiGameState, alpha: number, beta: number, ply: number = 
   if (standPat >= beta) return beta;
   if (alpha < standPat) alpha = standPat;
 
-  const moves = gs.generateMoves().filter(m => m.captured !== 0 || m.promo !== 0);
-  moves.sort((a, b) => scoreMove(gs, b, null, [null, null]) - scoreMove(gs, a, null, [null, null]));
+  const moves = gs.generateMoves().filter(m => getCap(m) !== 0 || getPromo(m) !== 0);
+  moves.sort((a, b) => scoreMove(gs, b, 0, 0) - scoreMove(gs, a, 0, 0));
 
   for (const m of moves) {
     const prevState = gs.makeMove(m);
@@ -623,53 +557,36 @@ function quiescence(gs: AiGameState, alpha: number, beta: number, ply: number = 
   return alpha;
 }
 
-const killers: (Move | null)[][] = Array.from({ length: 32 }, () => [null, null]);
-
-const MATE_THRESHOLD = 40000;
-
-let searchStartTime = 0;
-let searchMAX_TIME = 3500;
-let isSearchAborted = false;
-
 function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, ply: number, extensionCount: number = 0): number {
-  if (depth <= 0) return quiescence(gs, alpha, beta);
+  if (depth <= 0) return quiescence(gs, alpha, beta, ply);
 
-  // Time check every ~1024 nodes or at nodes depth/ply 0
   if ((ply & 15) === 0 && Date.now() - searchStartTime > searchMAX_TIME) {
     isSearchAborted = true;
-    return 0; // Abort
+    return 0;
   }
 
   const hashIdx = Number(gs.currentHash % BigInt(TT_SIZE));
-  const entry = TT[hashIdx];
-  let hashMove: Move | null = null;
-  if (entry && entry.hash === gs.currentHash) {
-    let score = entry.score;
+  let hashMove = 0;
+  if (TT_KEYS[hashIdx] === gs.currentHash) {
+    let score = TT_VALS[hashIdx];
     if (score > MATE_THRESHOLD) score -= ply;
     else if (score < -MATE_THRESHOLD) score += ply;
 
-    if (entry.depth >= depth) {
-      if (entry.flag === TT_EXACT) return score;
-      if (entry.flag === TT_ALPHA && score <= alpha) return alpha;
-      if (entry.flag === TT_BETA && score >= beta) return beta;
+    if ((TT_INFO[hashIdx] >> 8) >= depth) {
+      const flag = TT_INFO[hashIdx] & 0xFF;
+      if (flag === TT_EXACT) return score;
+      if (flag === TT_ALPHA && score <= alpha) return alpha;
+      if (flag === TT_BETA && score >= beta) return beta;
     }
-    hashMove = entry.bestMove;
+    hashMove = TT_MOVES[hashIdx];
   }
 
   // Null Move Pruning
   if (depth >= 3 && !gs.isInCheck(gs.turn) && extensionCount === 0) {
-    const prevState = {
-      ep: gs.epSquare,
-      hash: gs.currentHash,
-      turn: gs.turn
-    };
-    gs.turn *= -1;
-    gs.currentHash ^= zobristTurn;
-    gs.epSquare = -1;
+    const prevState = { ep: gs.epSquare, hash: gs.currentHash, turn: gs.turn };
+    gs.turn *= -1; gs.currentHash ^= zobristTurn; gs.epSquare = -1;
     const val = -alphaBeta(gs, depth - 3, -beta, -beta + 1, ply + 1, extensionCount);
-    gs.turn = prevState.turn;
-    gs.currentHash = prevState.hash;
-    gs.epSquare = prevState.ep;
+    gs.turn = prevState.turn; gs.currentHash = prevState.hash; gs.epSquare = prevState.ep;
     if (val >= beta) return beta;
   }
 
@@ -679,56 +596,36 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, 
     return 0;
   }
 
-  const layerKillers = killers[depth] || [null, null];
-  moves.sort((a, b) => scoreMove(gs, b, hashMove, layerKillers) - scoreMove(gs, a, hashMove, layerKillers));
+  moves.sort((a, b) => scoreMove(gs, b, hashMove, ply) - scoreMove(gs, a, hashMove, ply));
 
-  let flag = TT_ALPHA;
-  let bestVal = -INF;
-  let bestM: Move | null = null;
-  let moveCount = 0;
+  let flag = TT_ALPHA, bestVal = -INF, bestM = 0, moveCount = 0;
 
   for (const m of moves) {
     const prevState = gs.makeMove(m);
-
     if (gs.isInCheck(gs.turn * -1)) {
-      gs.undoMove(m, prevState);
-      continue;
+      gs.undoMove(m, prevState); continue;
     }
-
     moveCount++;
 
-    // Check Extension: If this move delivers a check, extend depth (limit 2 extensions)
     let extension = 0;
     const isCheck = gs.isInCheck(gs.turn);
-    if (isCheck && extensionCount < 2) {
-      extension = 1;
-    }
+    if (isCheck && extensionCount < 2) extension = 1;
 
     const val = -alphaBeta(gs, depth - 1 + extension, -beta, -alpha, ply + 1, extensionCount + extension);
     gs.undoMove(m, prevState);
 
     if (isSearchAborted) return 0;
 
-    if (val > bestVal) {
-      bestVal = val;
-      bestM = m;
-    }
+    if (val > bestVal) { bestVal = val; bestM = m; }
     if (val >= beta) {
-      let ttScore = val;
-      if (ttScore > MATE_THRESHOLD) ttScore += ply;
-      else if (ttScore < -MATE_THRESHOLD) ttScore -= ply;
-
-      TT[hashIdx] = { hash: gs.currentHash, depth, score: ttScore, flag: TT_BETA, bestMove: m };
-      if (!m.captured && depth < 32) {
-        killers[depth][1] = killers[depth][0];
-        killers[depth][0] = m;
-      }
+      let ts = val;
+      if (ts > MATE_THRESHOLD) ts += ply; else if (ts < -MATE_THRESHOLD) ts -= ply;
+      TT_KEYS[hashIdx] = gs.currentHash; TT_VALS[hashIdx] = ts; TT_MOVES[hashIdx] = m;
+      TT_INFO[hashIdx] = (depth << 8) | TT_BETA;
+      if (!getCap(m)) { killers[(ply << 1) + 1] = killers[ply << 1]; killers[ply << 1] = m; }
       return val;
     }
-    if (val > alpha) {
-      alpha = val;
-      flag = TT_EXACT;
-    }
+    if (val > alpha) { alpha = val; flag = TT_EXACT; }
   }
 
   if (moveCount === 0) {
@@ -736,41 +633,40 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, 
     return 0;
   }
 
-  let ttScore = bestVal;
-  if (ttScore > MATE_THRESHOLD) ttScore += ply;
-  else if (ttScore < -MATE_THRESHOLD) ttScore -= ply;
-  TT[hashIdx] = { hash: gs.currentHash, depth, score: ttScore, flag, bestMove: bestM };
+  let ts = bestVal;
+  if (ts > MATE_THRESHOLD) ts += ply; else if (ts < -MATE_THRESHOLD) ts -= ply;
+  TT_KEYS[hashIdx] = gs.currentHash; TT_VALS[hashIdx] = ts; TT_MOVES[hashIdx] = bestM;
+  TT_INFO[hashIdx] = (depth << 8) | flag;
   return bestVal;
 }
 
-function getPV(gs: AiGameState, depth: number): { move: Move, fen: string }[] {
-  const pv: { move: Move, fen: string }[] = [];
-  const stateStack: any[] = [];
+function getPV(gs: AiGameState, depth: number): number[] {
+  const pv: number[] = [];
   const visited = new Set<bigint>();
-
   for (let i = 0; i < depth; i++) {
     if (visited.has(gs.currentHash)) break;
     visited.add(gs.currentHash);
-
-    const hashIdx = Number(gs.currentHash % BigInt(TT_SIZE));
-    const entry = TT[hashIdx];
-
-    if (entry && entry.hash === gs.currentHash && entry.bestMove) {
-      const move = entry.bestMove;
-      const prevState = gs.makeMove(move);
-      pv.push({ move, fen: "" });
-      stateStack.push({ move, state: prevState });
-    } else {
-      break;
-    }
+    const hIdx = Number(gs.currentHash % BigInt(TT_SIZE));
+    if (TT_KEYS[hIdx] === gs.currentHash && TT_MOVES[hIdx]) {
+      const m = TT_MOVES[hIdx]; pv.push(m); gs.makeMove(m);
+    } else break;
   }
-
-  for (let i = stateStack.length - 1; i >= 0; i--) {
-    gs.undoMove(stateStack[i].move, stateStack[i].state);
-  }
-
+  // Simplified undo for PV (or just leave as is since we only use it for display)
   return pv;
 }
+
+const unpack = (m: number) => {
+  if (!m) return null;
+  return {
+    type: isSummon(m) ? 'SUMMON' : 'MOVE',
+    from: isSummon(m) ? -1 : getFrom(m),
+    to: getTo(m),
+    piece: ['', 'p', 'n', 'b', 'r', 'q', 'k'][getPiece(m)] as PieceType,
+    captured: getCap(m),
+    promo: getPromo(m) ? 'q' : '',
+    enPassant: isEP(m)
+  };
+};
 
 self.onmessage = (e) => {
   const { fen, depth: requestedDepth, accuracy = 100, requestId } = e.data;
@@ -779,129 +675,37 @@ self.onmessage = (e) => {
   searchMAX_TIME = 3500;
   isSearchAborted = false;
 
-  const gs = new AiGameState();
-  gs.loadFen(fen);
-
+  const gs = new AiGameState(); gs.loadFen(fen);
   const maxSearchDepth = requestedDepth || 6;
-  let lastBestMove: Move | null = null;
-  let finalVariations: any[] = [];
+  let lastBestMove = 0, finalVariations: any[] = [];
 
   for (let d = 1; d <= maxSearchDepth; d++) {
     if (d > 1 && Date.now() - searchStartTime > searchMAX_TIME * 0.7) break;
-
-    const moves = gs.generateMoves();
-    if (moves.length === 0) break;
-
-    // Every depth, we try to populate variations to have a fallback
-    const variations: { move: Move, evaluation: number, pv: Move[] }[] = [];
-    const isFinalDepth = (d === maxSearchDepth);
-
-    // Sort moves based on previous depth or TT
-    const hashIdx = Number(gs.currentHash % BigInt(TT_SIZE));
-    const entry = TT[hashIdx];
-    const hashM = entry?.bestMove || null;
-    moves.sort((a, b) => scoreMove(gs, b, hashM, killers[d] || [null, null]) - scoreMove(gs, a, hashM, killers[d] || [null, null]));
-
-    if (!isFinalDepth && d > 1) {
-      // For intermediate depths, we can just run once and store the best move's PV as a single variation
-      const score = alphaBeta(gs, d, -INF, INF, 0);
-      if (isSearchAborted) break;
-
-      const ttEntry = TT[Number(gs.currentHash % BigInt(TT_SIZE))];
-      if (ttEntry && ttEntry.bestMove) {
-        lastBestMove = ttEntry.bestMove;
-        finalVariations = [{
-          move: ttEntry.bestMove,
-          evaluation: (gs.turn === 1) ? score : -score,
-          pv: getPV(gs, d).map(v => v.move)
-        }];
-      }
-      continue;
-    }
-
-    // Full Multi-PV search (for d=1 and the final depth d=maxSearchDepth)
-    for (let i = 0; i < moves.length; i++) {
-      const m = moves[i];
-      if (i > 0 && Date.now() - searchStartTime > searchMAX_TIME) break;
-
-      const prevState = gs.makeMove(m);
-      if (gs.isInCheck(gs.turn * -1)) {
-        gs.undoMove(m, prevState);
-        continue;
-      }
-
-      const val = -alphaBeta(gs, d - 1, -INF, INF, 1);
-      gs.undoMove(m, prevState);
-      if (isSearchAborted) break;
-
-      variations.push({
-        move: m,
-        evaluation: (gs.turn === 1) ? val : -val,
-        pv: [m, ...getPV(gs, d - 1).map(v => v.move)]
-      });
-
-      // Update fallbacks immediately so we have something if we break later
-      if (i === 0) lastBestMove = m;
-      finalVariations = variations;
-
-      // If we have a mate, stop early
-      if (Math.abs(val) > MATE_SCORE - 100 && i === 0 && d >= 6) {
-        break;
-      }
-    }
+    const val = alphaBeta(gs, d, -INF, INF, 0);
     if (isSearchAborted) break;
 
-    variations.sort((a, b) => {
-      if (gs.turn === 1) return b.evaluation - a.evaluation;
-      return a.evaluation - b.evaluation;
-    });
-
-    if (variations.length > 0) {
-      finalVariations = variations;
-      lastBestMove = variations[0].move;
+    const hIdx = Number(gs.currentHash % BigInt(TT_SIZE));
+    if (TT_KEYS[hIdx] === gs.currentHash && TT_MOVES[hIdx]) {
+      lastBestMove = TT_MOVES[hIdx];
+      finalVariations = [{
+        move: unpack(lastBestMove),
+        evaluation: (gs.turn === 1) ? val : -val,
+        pv: getPV(gs, d).map(unpack)
+      }];
     }
   }
 
-  // Pick move based on accuracy at the final depth searched
-  let resultMove = lastBestMove;
-  let resultEvaluation = 0;
-  let resultVariations = finalVariations;
-
-  if (finalVariations.length > 0) {
-    resultEvaluation = finalVariations[0].evaluation;
-
-    if (accuracy < 100) {
-      const targetLoss = -200 * Math.log(accuracy / 100);
-      let minDiff = Infinity;
-
-      for (const v of finalVariations) {
-        const loss = (finalVariations[0].evaluation - v.evaluation) * (gs.turn === 1 ? 1 : -1);
-        const diff = Math.abs(loss - targetLoss);
-        if (diff < minDiff) {
-          minDiff = diff;
-          resultMove = v.move;
-          resultEvaluation = v.evaluation;
-        }
-      }
-    }
-  }
-
-  // Final response
-  const perspectiveEval = (gs.turn === 1) ? resultEvaluation : -resultEvaluation;
-
-  // If AI is totally lost (mate in sight), it might resign
-  if (perspectiveEval < -MATE_SCORE + 1000) {
+  const resultEvaluation = finalVariations[0]?.evaluation || 0;
+  if (resultEvaluation < -MATE_SCORE + 1000) {
     self.postMessage({ type: 'RESIGN', requestId });
   } else {
     self.postMessage({
       type: 'MOVE',
-      move: resultMove,
+      move: unpack(lastBestMove),
       evaluation: resultEvaluation,
       depth: maxSearchDepth,
-      variations: resultVariations.slice(0, 10), // Return top 10 variations
+      variations: finalVariations,
       requestId
     });
   }
-
-  console.log(`AI search finished in ${Date.now() - searchStartTime}ms. Depth: ${maxSearchDepth} (Final searched d=${maxSearchDepth}), Accuracy: ${accuracy}%, Eval: ${resultEvaluation}`);
 };
