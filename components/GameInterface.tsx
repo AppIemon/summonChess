@@ -799,7 +799,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
             📊 평가 막대 {showEvalBar ? 'ON' : 'OFF'}
           </button>
         )}
-        {isAnalysis && (
+        {(isAnalysis || isAi || isAiVsAi) && (
           <button
             className={showVariations ? styles.activeControl : ''}
             onClick={() => setShowVariations(!showVariations)}
