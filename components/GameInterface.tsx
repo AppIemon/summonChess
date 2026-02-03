@@ -400,16 +400,26 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   const [reviewProgress, setReviewProgress] = useState<{ current: number, total: number } | null>(null);
   const [reviewResults, setReviewResults] = useState<GameReviewResults | null>(null);
   const [reviewIndex, setReviewIndex] = useState<number | null>(null);
+  const [reviewGameInstance, setReviewGameInstance] = useState<SummonChessGame | null>(null);
+  const [reviewGameState, setReviewGameState] = useState<GameState | null>(null);
 
   // AI Difficulty (Brain Usage / Accuracy 10-100)
   const [aiDifficulty, setAiDifficulty] = useState<number>(initialAccuracy);
 
   useEffect(() => {
-    if (activeTab === 'review' && reviewResults) {
+    if (activeTab === 'review' && reviewResults && reviewIndex !== null) {
       setShowVariations(true);
       setShowEvalBar(true);
+      // Initialize interactive review game from the selected FEN
+      const fen = reviewIndex === -1 ? reviewResults.fens[0] : reviewResults.fens[reviewIndex + 1];
+      const game = new SummonChessGame(fen);
+      setReviewGameInstance(game);
+      setReviewGameState(game.getState());
+    } else {
+      setReviewGameInstance(null);
+      setReviewGameState(null);
     }
-  }, [activeTab, reviewResults]);
+  }, [activeTab, reviewResults, reviewIndex]);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -632,6 +642,39 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
     }
   }, [isAnalysis, aiLoaded, localGameState?.fen]);
 
+  // Handle Review Interactive AI
+  useEffect(() => {
+    if (activeTab === 'review' && reviewGameInstance && reviewGameState && aiLoaded) {
+      // Find whose move it is in the review scenario
+      // If player makes a move, AI should explain why it's bad by responding
+      const isAiTurn = reviewGameState.turn !== (reviewIndex !== null && reviewIndex >= 0 ? reviewResults?.moves[reviewIndex].color : 'w');
+
+      if (isAiTurn && !reviewGameState.winner) {
+        const handleReviewAiMove = async () => {
+          const result: any = await getBestMove(reviewGameState.fen, false, 100, 6);
+          if (result.evaluation !== undefined) {
+            setEvalScore(result.evaluation);
+            if (result.variations) setEvalVariations(result.variations);
+          }
+          const bestMove = result.move;
+          if (bestMove && bestMove.to !== -1) {
+            const typeMap: Record<number, PieceType> = { 1: 'p', 2: 'n', 3: 'b', 4: 'r', 5: 'q', 6: 'k' };
+            const toSquare = `${'abcdefgh'[bestMove.to % 8]}${Math.floor(bestMove.to / 8) + 1}`;
+            if (bestMove.type === 'SUMMON') {
+              reviewGameInstance.executeAction({ type: 'summon', piece: typeMap[bestMove.piece], square: toSquare });
+            } else {
+              const fromSquare = `${'abcdefgh'[bestMove.from % 8]}${Math.floor(bestMove.from / 8) + 1}`;
+              reviewGameInstance.executeAction({ type: 'move', from: fromSquare, to: toSquare });
+            }
+            setReviewGameState(reviewGameInstance.getState());
+          }
+        };
+        const timer = setTimeout(handleReviewAiMove, 500);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [activeTab, reviewGameState?.turn, aiLoaded]);
+
   // Handle Premove execution
   useEffect(() => {
     if (!isSpectator && gameState?.turn === myColor && premove && !gameState.winner) {
@@ -688,6 +731,43 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
 
   const handleSquareClick = async (square: string) => {
     const isGameOver = gameState.winner || gameState.isStalemate || gameState.isDraw || gameState.isTimeout;
+
+    // Scenario 1: Interactive Game Review
+    if (activeTab === 'review' && reviewGameInstance && reviewGameState) {
+      if (selectedHandPiece) {
+        if (validTargetSquares.includes(square)) {
+          reviewGameInstance.executeAction({ type: 'summon', piece: selectedHandPiece, square });
+          setReviewGameState(reviewGameInstance.getState());
+        }
+        setSelectedHandPiece(null);
+        setValidTargetSquares([]);
+        return;
+      }
+      if (selectedSquare) {
+        if (selectedSquare === square) { setSelectedSquare(null); setValidTargetSquares([]); return; }
+        if (validTargetSquares.includes(square)) {
+          reviewGameInstance.executeAction({ type: 'move', from: selectedSquare, to: square });
+          setReviewGameState(reviewGameInstance.getState());
+          setSelectedSquare(null);
+          setValidTargetSquares([]);
+          return;
+        }
+      }
+      import('chess.js').then(({ Chess }) => {
+        const chess = new Chess(getStandardFen(reviewGameState.fen));
+        const piece = chess.get(square as any);
+        if (piece && piece.color === reviewGameState.turn) {
+          setSelectedSquare(square);
+          const moves = chess.moves({ square: square as any, verbose: true });
+          setValidTargetSquares(moves.map(m => m.to));
+          setSelectedHandPiece(null);
+        } else {
+          setSelectedSquare(null); setValidTargetSquares([]);
+        }
+      });
+      return;
+    }
+
     if (isGameOver || isSpectator) return;
 
     if (isAnalysis || gameState.turn === myColor) {
@@ -756,6 +836,32 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
 
   const handleHandSelect = (piece: PieceType | null) => {
     const isGameOver = gameState.winner || gameState.isStalemate || gameState.isDraw || gameState.isTimeout;
+
+    // Scenario 1: Interactive Game Review
+    if (activeTab === 'review' && reviewGameInstance && reviewGameState) {
+      if (!piece) { setSelectedHandPiece(null); setValidTargetSquares([]); return; }
+      setSelectedHandPiece(piece);
+      setSelectedSquare(null);
+      Promise.all([
+        import('chess.js'), import('@/lib/game/engine')
+      ]).then(([{ Chess }, { isReachableByOwnPiece }]) => {
+        const chess = new Chess(getStandardFen(reviewGameState.fen));
+        const valid: string[] = [];
+        for (let r = 1; r <= 8; r++) {
+          for (let c = 0; c < 8; c++) {
+            const sq = `${'abcdefgh'[c]}${r}`;
+            if (!chess.get(sq as any)) {
+              if (!isReachableByOwnPiece(chess, sq as any, reviewGameState.turn)) continue;
+              if (piece === 'p' && (r === 1 || r === 8)) continue;
+              valid.push(sq);
+            }
+          }
+        }
+        setValidTargetSquares(valid);
+      });
+      return;
+    }
+
     if (isGameOver || isSpectator) return;
 
     if (!piece) {
@@ -965,25 +1071,36 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
 
       if (isForced) {
         classification = 'forced';
-      } else if (loss < 15) { // Tight threshold for top moves
-        const perspectiveAcc = bestEval * perspective;
+      } else if (loss < 20) { // Top moves threshold
+        const beforeScore = bestEval * perspective; // Best possible score before this move
+        const afterScore = playedEval * perspective;  // Score after current move
 
-        // Find second best move to see if this was the 'only' good move
+        // Find second best move to see if this was an "Only Move"
         const sortedVars = engineResult.variations?.sort((a, b) => (b.evaluation - a.evaluation) * perspective) || [];
-        const secondBestEval = sortedVars.length > 1 ? sortedVars[1].evaluation : (bestEval - 300 * perspective);
-        const secondLoss = Math.abs(bestEval - secondBestEval);
+        const secondBestEval = sortedVars.length > 1 ? sortedVars[1].evaluation : (bestEval - 500 * perspective);
+        const secondBestLoss = Math.abs(bestEval - secondBestEval);
 
-        if (loss < 5) {
-          // Brilliant (!!) - Only if it's a very strong move in a complex or winning position, 
-          // and other moves are significantly worse.
-          if (perspectiveAcc > 300 && secondLoss > 150) classification = 'brilliant';
-          // Great (!) - Strong move that maintains a clear advantage.
-          else if (perspectiveAcc > 100 && secondLoss > 80) classification = 'great';
-          else classification = 'best';
+        if (loss < 10) {
+          // Brilliant (!!) - Refined criteria:
+          // 1. Move results in a significant improvement of the position (Turnaround)
+          // 2. AND it's a very strong move compared to others (Only move)
+          // 3. AND the position was previously losing or equal (< 200)
+          if (afterScore > beforeScore + 100 && beforeScore < 200 && secondBestLoss > 150) {
+            classification = 'brilliant';
+          }
+          // Great (!) - Refined criteria:
+          // 1. Maintaining a winning position when other moves lose the advantage
+          // 2. OR being the "Only Move" in a critical spot (second best is much worse)
+          else if (secondBestLoss > 100 && afterScore > 50) {
+            classification = 'great';
+          } else {
+            classification = 'best';
+          }
         } else {
           classification = 'best';
         }
-      } else if (loss < 50) {
+      }
+      else if (loss < 50) {
         classification = 'excellent';
       } else if (loss < 120) {
         classification = 'good';
@@ -1184,21 +1301,21 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
           <div className={styles.sidebarSection}>
             <h3>{isAnalysis || isSpectator ? (myColor === 'w' ? '백 기물' : '흑 기물') : '나의 기물'}</h3>
             <Hand
-              pieces={myDeck}
+              pieces={activeTab === 'review' && reviewGameState ? (myColor === 'w' ? reviewGameState.whiteDeck : reviewGameState.blackDeck) : myDeck}
               color={myColor}
               onSelect={handleHandSelect}
-              selectedPiece={gameState.turn === myColor ? selectedHandPiece : null}
-              disabled={isSpectator || (isAnalysis && gameState.turn !== myColor)}
+              selectedPiece={(isAnalysis || activeTab === 'review' || gameState.turn === myColor) ? selectedHandPiece : null}
+              disabled={isSpectator || (isAnalysis && gameState.turn !== myColor) || (activeTab === 'review' && reviewGameState?.turn !== (reviewIndex !== null && reviewIndex >= 0 ? reviewResults?.moves[reviewIndex].color : 'w'))}
             />
           </div>
           <div className={styles.sidebarSection}>
             <h3>{isAnalysis || isSpectator ? (opponentColor === 'w' ? '백 기물' : '흑 기물') : '상대 기물'}</h3>
             <Hand
-              pieces={opponentDeck}
+              pieces={activeTab === 'review' && reviewGameState ? (opponentColor === 'w' ? reviewGameState.whiteDeck : reviewGameState.blackDeck) : opponentDeck}
               color={opponentColor}
               onSelect={handleHandSelect}
-              selectedPiece={gameState.turn === opponentColor ? selectedHandPiece : null}
-              disabled={isSpectator || (!isAnalysis) || (isAnalysis && gameState.turn !== opponentColor)}
+              selectedPiece={(activeTab === 'review' || isAnalysis) && (activeTab === 'review' ? reviewGameState?.turn === opponentColor : gameState.turn === opponentColor) ? selectedHandPiece : null}
+              disabled={isSpectator || (!isAnalysis && activeTab !== 'review') || (activeTab === 'review' && reviewGameState?.turn !== (reviewIndex !== null && reviewIndex >= 0 ? reviewResults?.moves[reviewIndex].color : 'w'))}
             />
           </div>
         </div>
@@ -1223,18 +1340,18 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
             )}
             <Board
               fen={activeTab === 'review' && reviewResults && reviewIndex !== null
-                ? (reviewIndex === -1 ? reviewResults.fens[0] : reviewResults.fens[reviewIndex + 1])
+                ? (reviewGameState ? reviewGameState.fen : (reviewIndex === -1 ? reviewResults.fens[0] : reviewResults.fens[reviewIndex + 1]))
                 : gameState.fen}
               onSquareClick={handleSquareClick}
               selectedSquare={selectedSquare}
               validTargetSquares={validTargetSquares}
               orientation={myColor}
               lastMove={activeTab === 'review' && reviewResults && reviewIndex !== null ? (
-                reviewIndex >= 0 ? { from: '', to: reviewResults.moves[reviewIndex].toSquare } : null
+                reviewGameState ? reviewGameState.lastMove : (reviewIndex >= 0 ? { from: '', to: reviewResults.moves[reviewIndex].toSquare } : null)
               ) : gameState.lastMove}
-              isCheckmate={gameState.isCheckmate}
+              isCheckmate={(activeTab === 'review' && reviewGameState) ? reviewGameState.isCheckmate : gameState.isCheckmate}
               premove={premove as any}
-              annotations={activeTab === 'review' && reviewResults && reviewIndex !== null && reviewIndex >= 0 ? {
+              annotations={activeTab === 'review' && reviewResults && reviewIndex !== null && reviewIndex >= 0 && (!reviewGameState || reviewGameState.fen === reviewResults.fens[reviewIndex + 1]) ? {
                 [reviewResults.moves[reviewIndex].toSquare]: {
                   icon: getClassificationIcon(reviewResults.moves[reviewIndex].classification),
                   color: getClassificationColor(reviewResults.moves[reviewIndex].classification),
@@ -1245,7 +1362,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
             {((isAi || isAiVsAi || isAnalysis) || activeTab === 'review') && showEvalBar && (
               <EvalBar
                 score={activeTab === 'review' && reviewResults && reviewIndex !== null
-                  ? (reviewIndex === -1 ? 0 : reviewResults.moves[reviewIndex].evaluation)
+                  ? (reviewGameState ? evalScore : (reviewIndex === -1 ? 0 : reviewResults.moves[reviewIndex].evaluation))
                   : evalScore}
                 depth={activeTab === 'review' ? 6 : evalDepth}
               />
@@ -1433,6 +1550,17 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
                         </div>
                       ))}
                     </div>
+                    {reviewGameState && reviewGameState.fen !== (reviewIndex === -1 ? reviewResults?.fens[0] : reviewResults?.fens[reviewIndex! + 1]) && (
+                      <div className={styles.scenarioNotice}>
+                        💡 가상 시나리오 진행 중...
+                        <button onClick={() => {
+                          const fen = reviewIndex === -1 ? reviewResults!.fens[0] : reviewResults!.fens[reviewIndex! + 1];
+                          const game = new SummonChessGame(fen);
+                          setReviewGameInstance(game);
+                          setReviewGameState(game.getState());
+                        }}>초기화</button>
+                      </div>
+                    )}
                     <div className={styles.reviewNav}>
                       <button
                         className={styles.navBtn}
