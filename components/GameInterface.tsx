@@ -394,18 +394,8 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   const [reviewResults, setReviewResults] = useState<GameReviewResults | null>(null);
   const [reviewIndex, setReviewIndex] = useState<number | null>(null);
 
-  // AI Difficulty
-  const [aiDifficulty, setAiDifficulty] = useState<number>(2); // 0: Easy (10%), 1: Medium (50%), 2: Hard (100%)
-
-  // Helper to map difficulty to depth
-  const getAiDepth = () => {
-    switch (aiDifficulty) {
-      case 0: return 1; // 10%
-      case 1: return 3; // 50%
-      case 2: return 6; // 100%
-      default: return 6;
-    }
-  };
+  // AI Difficulty (Brain Usage / Accuracy 10-100)
+  const [aiDifficulty, setAiDifficulty] = useState<number>(100);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -574,7 +564,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         const isGameOverBefore = !!(localGameState?.isCheckmate || localGameState?.isTimeout || localGameState?.isStalemate || localGameState?.isDraw || localGameState?.winner);
         if (isGameOverBefore) return;
 
-        const result: any = await getBestMove(localGameState.fen, isAiVsAi, getAiDepth());
+        const result: any = await getBestMove(localGameState.fen, isAiVsAi, aiDifficulty);
 
         // Check if the game ended while AI was thinking (e.g., opponent resigned)
         const currentLocalGameState = localGame.getState();
@@ -894,7 +884,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       const fenBefore = reviewGame.getState().fen;
 
       // 1. Get best move evaluation for current position
-      const engineResult = await getBestMove(fenBefore, false, 4);
+      const engineResult = await getBestMove(fenBefore, false, 100);
       const bestEval = engineResult.evaluation || 0;
       const bestMoveStr = engineResult.move ? formatMoveActionShort(engineResult.move) : '';
 
@@ -933,7 +923,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
           } else {
             // Need a separate evaluation for this specific move
             const fenAfter = reviewGame.getState().fen;
-            const nextRes = await getBestMove(fenAfter, false, 4);
+            const nextRes = await getBestMove(fenAfter, false, 100);
             playedEval = nextRes.evaluation !== undefined ? nextRes.evaluation : bestEval;
           }
         }
@@ -1022,31 +1012,27 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       <>
         {isAi && !isAiVsAi && (
           <div className={styles.difficultyControl}>
-            <h3>AI 난이도 설정</h3>
-            <div className={styles.difficultyButtons}>
-              <button
-                className={aiDifficulty === 0 ? styles.activeDifficulty : ''}
-                onClick={() => setAiDifficulty(0)}
-              >
-                초급 (지능 10%)
-              </button>
-              <button
-                className={aiDifficulty === 1 ? styles.activeDifficulty : ''}
-                onClick={() => setAiDifficulty(1)}
-              >
-                중급 (지능 50%)
-              </button>
-              <button
-                className={aiDifficulty === 2 ? styles.activeDifficulty : ''}
-                onClick={() => setAiDifficulty(2)}
-              >
-                고급 (지능 100%)
-              </button>
+            <h3>AI 뇌 사용량 ({aiDifficulty}%)</h3>
+            <div className={styles.sliderContainer}>
+              <input
+                type="range"
+                min="10"
+                max="100"
+                step="5"
+                value={aiDifficulty}
+                onChange={(e) => setAiDifficulty(parseInt(e.target.value))}
+                className={styles.difficultySlider}
+              />
+              <div className={styles.sliderLabels}>
+                <span>10% (초보)</span>
+                <span>100% (천재)</span>
+              </div>
             </div>
             <p className={styles.difficultyDesc}>
-              {aiDifficulty === 0 && "컴퓨터가 매우 얕은 수읽기만 수행합니다."}
-              {aiDifficulty === 1 && "컴퓨터가 적당한 수읽기를 수행합니다."}
-              {aiDifficulty === 2 && "컴퓨터가 최선을 다해 수읽기를 수행합니다."}
+              {aiDifficulty <= 30 && "컴퓨터가 아주 단순한 실수를 자주 합니다."}
+              {aiDifficulty > 30 && aiDifficulty <= 70 && "컴퓨터가 적당한 지능으로 대결합니다."}
+              {aiDifficulty > 70 && aiDifficulty < 100 && "컴퓨터가 꽤 날카로운 수를 둡니다."}
+              {aiDifficulty === 100 && "컴퓨터가 최선을 다해 승리를 노립니다."}
             </p>
           </div>
         )}

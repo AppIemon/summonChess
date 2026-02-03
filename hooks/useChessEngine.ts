@@ -18,7 +18,7 @@ export const useChessEngine = () => {
     }
   }, []);
 
-  const getBestMove = async (fen: string, isAiVsAi: boolean = false, depth?: number): Promise<{ type: 'MOVE' | 'RESIGN'; move?: any; evaluation?: number; depth?: number; variations?: any[] }> => {
+  const getBestMove = async (fen: string, isAiVsAi: boolean = false, accuracy: number = 100): Promise<{ type: 'MOVE' | 'RESIGN'; move?: any; evaluation?: number; depth?: number; variations?: any[] }> => {
     // 1. Check MongoDB Cache
     try {
       // Occasionally skip cache for variety/exploration
@@ -26,7 +26,7 @@ export const useChessEngine = () => {
       const skipChance = isAiVsAi ? 0.3 : 0.1;
       const skipCache = Math.random() < skipChance;
 
-      if (!skipCache && !depth) { // Don't use cache if custom depth is requested
+      if (!skipCache && accuracy >= 100) { // Don't use cache if accuracy < 100 as we want variety
         const resp = await fetch(`/api/ai/best-move?fen=${encodeURIComponent(fen)}`);
         if (resp.ok) {
           const data = await resp.json();
@@ -43,7 +43,7 @@ export const useChessEngine = () => {
           }
         }
       } else {
-        console.log('AI skipping cache for exploration');
+        console.log('AI skipping cache for exploration or accuracy control');
       }
     } catch (err) {
       console.warn('Failed to fetch cached AI move:', err);
@@ -60,8 +60,8 @@ export const useChessEngine = () => {
         workerRef.current?.removeEventListener('message', handleMessage);
         const result = e.data;
 
-        // 3. Save to MongoDB for future use (only if using default depth)
-        if (!depth && result.type === 'MOVE' && result.move) {
+        // 3. Save to MongoDB for future use (only if 100% accuracy)
+        if (accuracy >= 100 && result.type === 'MOVE' && result.move) {
           try {
             fetch('/api/ai/best-move', {
               method: 'POST',
@@ -82,7 +82,7 @@ export const useChessEngine = () => {
       };
 
       workerRef.current.addEventListener('message', handleMessage);
-      workerRef.current.postMessage({ fen, depth });
+      workerRef.current.postMessage({ fen, accuracy });
     });
   };
 

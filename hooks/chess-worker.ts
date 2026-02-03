@@ -624,21 +624,21 @@ function getPV(gs: AiGameState, depth: number): { move: Move, fen: string }[] {
 }
 
 self.onmessage = (e) => {
-  const { fen, depth: requestedDepth } = e.data;
+  const { fen, depth: requestedDepth, accuracy = 100 } = e.data;
   initZobrist();
   const startTime = Date.now();
 
   const gs = new AiGameState();
   gs.loadFen(fen);
 
-  const maxSearchDepth = requestedDepth || 6;
+  const maxSearchDepth = 6; // Fixed depth as requested
   let lastBestMove: Move | null = null;
   let finalVariations: any[] = [];
-  const MAX_TIME = 2500; // Hard time limit of 2.5 seconds per search
+  const MAX_TIME = 3500; // Hard time limit of 3.5 seconds per search
 
   for (let d = 1; d <= maxSearchDepth; d++) {
     const currentTime = Date.now();
-    if (d > 1 && currentTime - startTime > MAX_TIME * 0.6) break; // Don't start a new depth if we've used 60% of time
+    if (d > 1 && currentTime - startTime > MAX_TIME * 0.7) break;
 
     const moves = gs.generateMoves();
     if (moves.length === 0) break;
@@ -651,7 +651,7 @@ self.onmessage = (e) => {
     const variations: { move: Move, evaluation: number, pv: Move[] }[] = [];
 
     for (const m of moves) {
-      if (d > 1 && Date.now() - startTime > MAX_TIME) break; // Inter-move time check
+      if (d > 1 && Date.now() - startTime > MAX_TIME) break;
 
       const prevState = gs.makeMove(m);
       if (gs.isInCheck(gs.turn * -1)) {
@@ -669,39 +669,53 @@ self.onmessage = (e) => {
       });
     }
 
-    if (Date.now() - startTime > MAX_TIME && variations.length < moves.length) {
-      // If we timed out mid-depth, use the results if we have at least one or fallback
-    }
-
     variations.sort((a, b) => {
       if (gs.turn === 1) return b.evaluation - a.evaluation;
       return a.evaluation - b.evaluation;
     });
 
     if (variations.length > 0) {
+      finalVariations = variations;
+      // Preliminary best move (best of this depth)
+      lastBestMove = variations[0].move;
+
       const bestEval = variations[0].evaluation;
-
-      // If a mate is found, we can potentially stop or narrow down
       const isWinningMate = (gs.turn === 1 && bestEval > MATE_SCORE - 100) || (gs.turn === -1 && bestEval < -MATE_SCORE + 100);
-
-      const threshold = isWinningMate ? 0 : 20; // NO variety if we found a mate! Use the fastest one.
-      const topMoves = variations.filter(v =>
-        gs.turn === 1
-          ? v.evaluation >= bestEval - threshold
-          : v.evaluation <= bestEval + threshold
-      );
-
-      const randomIdx = Math.floor(Math.random() * topMoves.length);
-      lastBestMove = topMoves[randomIdx].move;
-      finalVariations = variations.slice(0, 5);
-
-      if (isWinningMate && d >= 4) break; // If we found a mate at reasonable depth, stop
+      if (isWinningMate && d >= 4) break;
     }
   }
 
-  const topVariations = finalVariations;
+  // Pick move based on accuracy at the final depth searched
+  if (finalVariations.length > 0) {
+    const bestEval = finalVariations[0].evaluation;
+
+    if (accuracy >= 100) {
+      lastBestMove = finalVariations[0].move;
+    } else {
+      // Logic for Accuracy: 
+      // Loss = -200 * ln(accuracy / 100)
+      // We want to find a move that has a loss close to this.
+      const targetLoss = -200 * Math.log(accuracy / 100);
+      const perspective = gs.turn === 1 ? 1 : -1;
+
+      let closestMove = finalVariations[0].move;
+      let minDiff = Infinity;
+
+      for (const v of finalVariations) {
+        const moveLoss = (bestEval - v.evaluation) * perspective;
+        const diff = Math.abs(moveLoss - targetLoss);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestMove = v.move;
+        }
+      }
+      lastBestMove = closestMove;
+    }
+  }
+
   const bestM = lastBestMove;
-  const maxVal = topVariations[0]?.evaluation || 0;
+  const topVariations = finalVariations.slice(0, 5);
+  const maxVal = finalVariations[0]?.evaluation || 0;
   const perspectiveMaxVal = (gs.turn === 1) ? maxVal : -maxVal;
 
   if (!bestM && finalVariations.length === 0) {
@@ -719,11 +733,11 @@ self.onmessage = (e) => {
     self.postMessage({
       type: 'MOVE',
       move: bestM,
-      evaluation: topVariations[0]?.evaluation,
+      evaluation: finalVariations[0]?.evaluation,
       depth: maxSearchDepth,
       variations: topVariations
     });
   }
 
-  console.log(`AI search finished in ${Date.now() - startTime}ms. Final depth:`, finalVariations.length > 0 ? "..." : 0);
+  console.log(`AI search finished. Accuracy: ${accuracy}%, Target Loss: ${accuracy < 100 ? Math.round(-200 * Math.log(accuracy / 100)) : 0}`);
 };
