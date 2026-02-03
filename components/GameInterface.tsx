@@ -489,7 +489,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         const isGameOverBefore = !!(localGameState?.isCheckmate || localGameState?.isTimeout || localGameState?.isStalemate || localGameState?.isDraw || localGameState?.winner);
         if (isGameOverBefore) return;
 
-        const result: any = await getBestMove(localGameState.fen);
+        const result: any = await getBestMove(localGameState.fen, isAiVsAi);
 
         // Check if the game ended while AI was thinking (e.g., opponent resigned)
         const currentLocalGameState = localGame.getState();

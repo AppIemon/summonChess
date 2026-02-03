@@ -11,7 +11,7 @@ export interface IBestMove extends Document {
 }
 
 const BestMoveSchema: Schema = new Schema({
-  fen: { type: String, required: true, unique: true },
+  fen: { type: String, required: true },
   move: { type: Schema.Types.Mixed, required: true },
   score: { type: Number, required: true },
   depth: { type: Number, required: true },
@@ -20,7 +20,8 @@ const BestMoveSchema: Schema = new Schema({
   updatedAt: { type: Date, default: Date.now },
 });
 
-// Index FEN for fast lookups
+// Index FEN and move together for uniqueness per move-position pair, and FEN alone for lookups
+BestMoveSchema.index({ fen: 1, move: 1 }, { unique: true });
 BestMoveSchema.index({ fen: 1 });
 
 export default mongoose.models.BestMove || mongoose.model<IBestMove>('BestMove', BestMoveSchema);

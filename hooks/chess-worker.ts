@@ -622,7 +622,7 @@ self.onmessage = (e) => {
     if (variations.length > 0) {
       // Pick one randomly from moves within 10 centipawns of the best move for variety
       const bestEval = variations[0].evaluation;
-      const threshold = 10;
+      const threshold = 30; // Increased threshold for more variety in move selection
       const topMoves = variations.filter(v =>
         gs.turn === 1
           ? v.evaluation >= bestEval - threshold

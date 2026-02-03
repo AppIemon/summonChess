@@ -12,18 +12,36 @@ export async function GET(req: NextRequest) {
     }
 
     await connectDB();
-    const bestMove = await BestMove.findOne({ fen });
+    const allMoves = await BestMove.find({ fen });
 
-    if (bestMove) {
-      // If the move has been proven bad (many more losses than wins), ignore it
-      // This forces the AI to re-evaluate and hopefully find a better move
-      if (bestMove.lossCount > bestMove.winCount + 1) {
-        console.log(`Skipping bad cached move for FEN: ${fen} (Wins: ${bestMove.winCount}, Losses: ${bestMove.lossCount})`);
-        return NextResponse.json({ bestMove: null });
-      }
+    if (allMoves.length === 0) {
+      return NextResponse.json({ bestMove: null });
     }
 
-    return NextResponse.json({ bestMove: bestMove ? { move: bestMove.move, score: bestMove.score, depth: bestMove.depth } : null });
+    // Filter out moves that have been proven bad
+    const suitableMoves = allMoves.filter(m => {
+      // Ignore if losses > wins + 2 (slightly more strict than before to keep variety)
+      return m.lossCount <= m.winCount + 2;
+    });
+
+    if (suitableMoves.length === 0) {
+      // If all moves are "bad", we might want to return nothing to force re-calculation
+      // or return the least bad one. Let's return nothing.
+      return NextResponse.json({ bestMove: null });
+    }
+
+    // Pick a random move from the suitable ones
+    // We can bias this by score later if needed
+    const randomIndex = Math.floor(Math.random() * suitableMoves.length);
+    const selected = suitableMoves[randomIndex];
+
+    return NextResponse.json({
+      bestMove: {
+        move: selected.move,
+        score: selected.score,
+        depth: selected.depth
+      }
+    });
   } catch (error: any) {
     console.error('Error fetching best move:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -40,34 +58,25 @@ export async function POST(req: NextRequest) {
 
     await connectDB();
 
-    // UPSERT logic
-    const existing = await BestMove.findOne({ fen });
-
-    let winCount = 0;
-    let lossCount = 0;
+    // Check if THIS SPECIFIC move exists for this FEN
+    const existing = await BestMove.findOne({ fen, move });
 
     if (existing) {
-      // If same move, keep counts. If different move, reset them.
-      const moveStr = JSON.stringify(move);
-      const existingMoveStr = JSON.stringify(existing.move);
-
-      if (moveStr === existingMoveStr) {
-        winCount = existing.winCount;
-        lossCount = existing.lossCount;
-      }
-
       // Only update if depth is >= existing depth OR if existing was "bad"
       const isBad = existing.lossCount > existing.winCount + 1;
       if (existing.depth > depth && !isBad) {
         return NextResponse.json({ success: true, masked: 'Existing move has higher depth' });
       }
-    }
 
-    await BestMove.findOneAndUpdate(
-      { fen },
-      { move, score, depth, winCount, lossCount, updatedAt: new Date() },
-      { upsert: true, new: true }
-    );
+      await BestMove.updateOne(
+        { _id: existing._id },
+        { score, depth, updatedAt: new Date() }
+      );
+    } else {
+      await BestMove.create({
+        fen, move, score, depth, winCount: 0, lossCount: 0, updatedAt: new Date()
+      });
+    }
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

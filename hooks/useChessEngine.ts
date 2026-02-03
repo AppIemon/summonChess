@@ -18,11 +18,13 @@ export const useChessEngine = () => {
     }
   }, []);
 
-  const getBestMove = async (fen: string): Promise<{ type: 'MOVE' | 'RESIGN'; move?: any; evaluation?: number; depth?: number; variations?: any[] }> => {
+  const getBestMove = async (fen: string, isAiVsAi: boolean = false): Promise<{ type: 'MOVE' | 'RESIGN'; move?: any; evaluation?: number; depth?: number; variations?: any[] }> => {
     // 1. Check MongoDB Cache
     try {
-      // Occasionally skip cache for variety/exploration (10% chance)
-      const skipCache = Math.random() < 0.1;
+      // Occasionally skip cache for variety/exploration
+      // Higher skip rate for AI vs AI to encourage learning new variations
+      const skipChance = isAiVsAi ? 0.3 : 0.1;
+      const skipCache = Math.random() < skipChance;
 
       if (!skipCache) {
         const resp = await fetch(`/api/ai/best-move?fen=${encodeURIComponent(fen)}`);
