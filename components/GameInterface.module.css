@@ -1275,3 +1275,62 @@
     opacity: 0;
   }
 }
+
+/* Difficulty Controls */
+.difficultyControl {
+  background: #f8f9fa;
+  padding: 15px;
+  border-radius: 12px;
+  border: 1px solid #eee;
+  margin-bottom: 20px;
+}
+
+.difficultyControl h3 {
+  font-size: 1rem;
+  color: #555;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.difficultyButtons {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.difficultyButtons button {
+  flex: 1;
+  padding: 10px;
+  font-size: 0.9rem;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #555;
+}
+
+.difficultyButtons button:hover {
+  background: #f1f3f5;
+}
+
+.activeDifficulty {
+  background: #667eea !important;
+  color: #fff !important;
+  border-color: #5a6fd1 !important;
+  box-shadow: 0 4px 10px rgba(102, 126, 234, 0.3);
+}
+
+.difficultyDesc {
+  text-align: center;
+  font-size: 0.9rem;
+  color: #666;
+  background: #fff;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #eee;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

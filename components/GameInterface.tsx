@@ -394,6 +394,19 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   const [reviewResults, setReviewResults] = useState<GameReviewResults | null>(null);
   const [reviewIndex, setReviewIndex] = useState<number | null>(null);
 
+  // AI Difficulty
+  const [aiDifficulty, setAiDifficulty] = useState<number>(2); // 0: Easy (10%), 1: Medium (50%), 2: Hard (100%)
+
+  // Helper to map difficulty to depth
+  const getAiDepth = () => {
+    switch (aiDifficulty) {
+      case 0: return 1; // 10%
+      case 1: return 3; // 50%
+      case 2: return 6; // 100%
+      default: return 6;
+    }
+  };
+
   useEffect(() => {
     const checkAuth = async () => {
       try {
@@ -561,7 +574,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         const isGameOverBefore = !!(localGameState?.isCheckmate || localGameState?.isTimeout || localGameState?.isStalemate || localGameState?.isDraw || localGameState?.winner);
         if (isGameOverBefore) return;
 
-        const result: any = await getBestMove(localGameState.fen, isAiVsAi);
+        const result: any = await getBestMove(localGameState.fen, isAiVsAi, getAiDepth());
 
         // Check if the game ended while AI was thinking (e.g., opponent resigned)
         const currentLocalGameState = localGame.getState();
@@ -951,6 +964,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         // High loss move. Check if it's a "Miss" (missing a big advantage)
         const bestAdvantage = bestEval * perspective;
         const playedAdvantage = playedEval * perspective;
+
         if (bestAdvantage > 150 && playedAdvantage < 50) {
           classification = 'miss';
         } else if (loss < 350) {
@@ -958,7 +972,12 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         } else if (loss < 700) {
           classification = 'mistake';
         } else {
-          classification = 'blunder';
+          // If already significantly losing, downgrade blunder to mistake
+          if (bestAdvantage < -500) {
+            classification = 'mistake';
+          } else {
+            classification = 'blunder';
+          }
         }
       }
 
@@ -994,9 +1013,40 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
     setReviewIndex(analyzedMoves.length - 1);
   };
 
+
   const renderControls = () => {
     return (
       <>
+        {isAi && !isAiVsAi && (
+          <div className={styles.difficultyControl}>
+            <h3>AI 난이도 설정</h3>
+            <div className={styles.difficultyButtons}>
+              <button
+                className={aiDifficulty === 0 ? styles.activeDifficulty : ''}
+                onClick={() => setAiDifficulty(0)}
+              >
+                초급 (지능 10%)
+              </button>
+              <button
+                className={aiDifficulty === 1 ? styles.activeDifficulty : ''}
+                onClick={() => setAiDifficulty(1)}
+              >
+                중급 (지능 50%)
+              </button>
+              <button
+                className={aiDifficulty === 2 ? styles.activeDifficulty : ''}
+                onClick={() => setAiDifficulty(2)}
+              >
+                고급 (지능 100%)
+              </button>
+            </div>
+            <p className={styles.difficultyDesc}>
+              {aiDifficulty === 0 && "컴퓨터가 매우 얕은 수읽기만 수행합니다."}
+              {aiDifficulty === 1 && "컴퓨터가 적당한 수읽기를 수행합니다."}
+              {aiDifficulty === 2 && "컴퓨터가 최선을 다해 수읽기를 수행합니다."}
+            </p>
+          </div>
+        )}
         {(isAi || isAiVsAi || isAnalysis || (gameState && (gameState.winner || gameState.isDraw))) && (
           <button
             className={activeTab === 'review' ? styles.activeControl : ''}
