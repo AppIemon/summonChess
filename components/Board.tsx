@@ -13,7 +13,7 @@ interface BoardProps {
   lastMove?: { from: string; to: string } | null;
   isCheckmate?: boolean;
   premove?: { from: string; to?: string } | null;
-  annotations?: { [square: string]: { icon: string; color: string } } | null;
+  annotations?: { [square: string]: { icon: string; color: string; class?: string } } | null;
 }
 
 // FEN Parser helper
@@ -121,7 +121,11 @@ export default function Board({
 
             {annotations && annotations[squareId] && (
               <div
-                className={styles.reviewIcon}
+                className={clsx(styles.reviewIcon, styles.effectIcon, {
+                  [styles.animBrilliant]: (annotations[squareId] as any).class === 'brilliant',
+                  [styles.animGreat]: (annotations[squareId] as any).class === 'great',
+                  [styles.animBlunder]: (annotations[squareId] as any).class === 'blunder'
+                })}
                 style={{ backgroundColor: annotations[squareId].color }}
               >
                 {annotations[squareId].icon}

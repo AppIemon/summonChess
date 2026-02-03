@@ -951,10 +951,13 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
 
       if (isForced) {
         classification = 'forced';
-      } else if (loss < 15) {
+      } else if (loss < 25) {
         const absBest = Math.abs(bestEval);
-        if (absBest < 80 && (bestEval * perspective) > 100) classification = 'brilliant';
-        else if (absBest < 150 && (bestEval * perspective) > 120) classification = 'great';
+        const score = bestEval * perspective;
+
+        // Relaxed criteria for Great (!) and Brilliant (!!)
+        if (loss < 10 && score > 200) classification = 'brilliant';
+        else if (loss < 20 && score > 50) classification = 'great';
         else classification = 'best';
       } else if (loss < 60) {
         classification = 'excellent';
@@ -1083,7 +1086,9 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
               setReviewResults(null);
               setReviewProgress(null);
               setReviewIndex(null);
-              setIsAnalysis(false);
+              setReviewIndex(null);
+              // setIsAnalysis(false) is not available as it is a prop. 
+              // For AI mode restart, resetting localGame is sufficient.
               setShowVictory(false);
               setFinalResult(null);
             }
@@ -1197,7 +1202,8 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
               annotations={activeTab === 'review' && reviewResults && reviewIndex !== null && reviewIndex >= 0 ? {
                 [reviewResults.moves[reviewIndex].toSquare]: {
                   icon: getClassificationIcon(reviewResults.moves[reviewIndex].classification),
-                  color: getClassificationColor(reviewResults.moves[reviewIndex].classification)
+                  color: getClassificationColor(reviewResults.moves[reviewIndex].classification),
+                  class: reviewResults.moves[reviewIndex].classification
                 }
               } : null}
             />

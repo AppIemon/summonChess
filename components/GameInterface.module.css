@@ -1334,3 +1334,38 @@
   align-items: center;
   justify-content: center;
 }
+.menuTabContainer {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Reuse the mobileControls class for the Menu tab controls on desktop too */
+.mobileControls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  width: 100%;
+}
+
+.mobileControls button {
+  width: 100%;
+  padding: 14px;
+  background: white;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  font-weight: 700;
+  color: #444;
+  transition: all 0.2s;
+  cursor: pointer;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.03);
+}
+
+.mobileControls button:hover {
+  background: #f8f9fa;
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+  border-color: #ddd;
+}
