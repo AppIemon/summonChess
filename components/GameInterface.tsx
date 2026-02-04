@@ -409,6 +409,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   const [reviewGameInstance, setReviewGameInstance] = useState<SummonChessGame | null>(null);
   const [reviewGameState, setReviewGameState] = useState<GameState | null>(null);
   const [scenarioMoves, setScenarioMoves] = useState<any[]>([]);
+  const isReviewingRef = useRef(false);
 
   // AI Difficulty (Brain Usage / Accuracy 10-100)
   const [aiDifficulty, setAiDifficulty] = useState<number>(initialAccuracy);
@@ -625,10 +626,10 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
           const toSquare = `${'abcdefgh'[bestMove.to % 8]}${Math.floor(bestMove.to / 8) + 1}`;
 
           if (bestMove.type === 'SUMMON') {
-            executeAction({ type: 'summon', piece: typeMap[bestMove.piece], square: toSquare }, bestMove);
+            executeAction({ type: 'summon', piece: typeMap[bestMove.piece], square: toSquare } as Action, bestMove);
           } else {
             const fromSquare = `${'abcdefgh'[bestMove.from % 8]}${Math.floor(bestMove.from / 8) + 1}`;
-            executeAction({ type: 'move', from: fromSquare, to: toSquare }, bestMove);
+            executeAction({ type: 'move', from: fromSquare, to: toSquare } as Action, bestMove);
           }
         }
       };
@@ -683,11 +684,11 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
             let moveStr = '';
             if (bestMove.type === 'SUMMON') {
               const pieceType = typeMap[bestMove.piece];
-              reviewGameInstance.executeAction({ type: 'summon', piece: pieceType, square: toSquare });
+              reviewGameInstance.executeAction({ type: 'summon', piece: pieceType, square: toSquare } as Action);
               moveStr = `${pieceType.toUpperCase()}@${toSquare}`;
             } else {
               const fromSquare = `${'abcdefgh'[bestMove.from % 8]}${Math.floor(bestMove.from / 8) + 1}`;
-              reviewGameInstance.executeAction({ type: 'move', from: fromSquare, to: toSquare });
+              reviewGameInstance.executeAction({ type: 'move', from: fromSquare, to: toSquare } as Action);
               moveStr = `${fromSquare}${toSquare}`;
             }
             setReviewGameState(reviewGameInstance.getState());
@@ -700,6 +701,16 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       return () => clearTimeout(timer);
     }
   }, [activeTab, reviewGameState?.fen, aiLoaded, reviewIndex, reviewResults]);
+
+  // Auto-start/continue review
+  useEffect(() => {
+    if (activeTab === 'review' && !isReviewingRef.current && gameState?.history?.length) {
+      const currentMovesCount = reviewResults?.moves.length || 0;
+      if (currentMovesCount < gameState.history.length) {
+        handleStartReview(currentMovesCount > 0);
+      }
+    }
+  }, [gameState?.history?.length, activeTab, !!reviewResults]);
 
   // Handle Premove execution
   useEffect(() => {
@@ -762,7 +773,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
     if (activeTab === 'review' && reviewGameInstance && reviewGameState) {
       if (selectedHandPiece) {
         if (validTargetSquares.includes(square)) {
-          const action = { type: 'summon', piece: selectedHandPiece, square };
+          const action: Action = { type: 'summon', piece: selectedHandPiece, square };
           reviewGameInstance.executeAction(action);
           const nextState = reviewGameInstance.getState();
           setReviewGameState(nextState);
@@ -775,7 +786,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       if (selectedSquare) {
         if (selectedSquare === square) { setSelectedSquare(null); setValidTargetSquares([]); return; }
         if (validTargetSquares.includes(square)) {
-          const action = { type: 'move', from: selectedSquare, to: square };
+          const action: Action = { type: 'move', from: selectedSquare, to: square };
           reviewGameInstance.executeAction(action);
           const nextState = reviewGameInstance.getState();
           setReviewGameState(nextState);
@@ -805,7 +816,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
     if (isAnalysis || gameState.turn === myColor) {
       if (selectedHandPiece) {
         if (validTargetSquares.includes(square)) {
-          await executeAction({ type: 'summon', piece: selectedHandPiece, square });
+          await executeAction({ type: 'summon', piece: selectedHandPiece, square } as Action);
         } else {
           setSelectedHandPiece(null);
           setValidTargetSquares([]);
@@ -821,7 +832,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         }
 
         if (validTargetSquares.includes(square)) {
-          await executeAction({ type: 'move', from: selectedSquare, to: square });
+          await executeAction({ type: 'move', from: selectedSquare, to: square } as Action);
           return;
         }
       }
@@ -841,7 +852,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       });
     } else {
       if (selectedHandPiece) {
-        setPremove({ type: 'summon', piece: selectedHandPiece, square });
+        setPremove({ type: 'summon', piece: selectedHandPiece, square } as Action);
         setSelectedHandPiece(null);
         setValidTargetSquares([]);
       } else if (selectedSquare) {
@@ -850,7 +861,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
           setPremove(null);
           return;
         }
-        setPremove({ type: 'move', from: selectedSquare, to: square });
+        setPremove({ type: 'move', from: selectedSquare, to: square } as Action);
         setSelectedSquare(null);
         setValidTargetSquares([]);
       } else {
@@ -937,13 +948,13 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
     const nickname = username || 'Unknown';
     const text = chatInput;
     setChatInput('');
-    await executeAction({ type: 'chat', text, nickname });
+    await executeAction({ type: 'chat', text, nickname } as Action);
   };
 
   const handleResign = async () => {
     if (isSpectator) return;
     if (!confirm('정말 기권하시겠습니까?')) return;
-    await executeAction({ type: 'resign' });
+    await executeAction({ type: 'resign' } as Action);
   };
 
   const handleReturnToLobby = async () => {
@@ -995,11 +1006,11 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   const myTime = myColor === 'w' ? gameState.whiteTime : gameState.blackTime;
 
   const handleUndoRequest = async () => {
-    await executeAction({ type: 'undo_request' });
+    await executeAction({ type: 'undo_request' } as Action);
   };
 
   const handleUndoResponse = async (accept: boolean) => {
-    await executeAction({ type: 'undo_response', accept });
+    await executeAction({ type: 'undo_response', accept } as Action);
   };
 
   const handleCopyNotation = () => {
@@ -1017,47 +1028,52 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
     alert('기보가 복사되었습니다!');
   };
 
-  const handleStartReview = async () => {
+  const handleStartReview = async (isAppend = false) => {
+    if (isReviewingRef.current) return;
     if (!gameState?.history || gameState.history.length === 0) return;
 
-    setReviewProgress({ current: 0, total: gameState.history.length });
-    setReviewResults(null);
-    setReviewIndex(null);
+    const startIndex = (isAppend && reviewResults) ? reviewResults.moves.length : 0;
+    if (isAppend && startIndex >= gameState.history.length) return;
 
-    // Create a temporary game to replay history
-    const reviewGame = new SummonChessGame();
-    const analyzedMoves: MoveAnalysis[] = [];
-    const positions: string[] = [reviewGame.getState().fen];
+    isReviewingRef.current = true;
+    setReviewProgress({ current: startIndex, total: gameState.history.length });
 
-    let whiteAccTotal = 0;
-    let blackAccTotal = 0;
+    if (!isAppend) {
+      setReviewResults(null);
+      setReviewIndex(null);
+    }
 
-    for (let i = 0; i < gameState.history.length; i++) {
+    // Create or continue a temporary game to replay history
+    const lastFen = (isAppend && reviewResults) ? reviewResults.fens[reviewResults.fens.length - 1] : undefined;
+    const reviewGame = new SummonChessGame(lastFen);
+
+    const analyzedMoves: MoveAnalysis[] = (isAppend && reviewResults) ? [...reviewResults.moves] : [];
+    const positions: string[] = (isAppend && reviewResults) ? [...reviewResults.fens] : [reviewGame.getState().fen];
+
+    for (let i = startIndex; i < gameState.history.length; i++) {
       const moveStr = gameState.history[i];
       const turn = reviewGame.getState().turn;
       const fenBefore = reviewGame.getState().fen;
 
-      // 1. Get best move evaluation for current position (Increase depth for better review)
       const engineResult = await getBestMove(fenBefore, false, 100, 6);
       const bestEval = engineResult.evaluation || 0;
       const bestMoveStr = engineResult.move ? formatMoveActionShort(engineResult.move) : '';
       const topVars = engineResult.variations || [];
 
-      // 2. Parse and play the actual move from history
       let playedEval = bestEval;
-      let playedAction: any = null;
+      let playedAction: Action | null = null;
       let toSquare = '';
 
       if (moveStr.includes('@')) {
         const [pStr, sq] = moveStr.split('@');
         toSquare = sq;
-        playedAction = { type: 'summon', piece: pStr.toLowerCase() as PieceType, square: sq as Square };
+        playedAction = { type: 'summon', piece: pStr.toLowerCase() as PieceType, square: sq } as Action;
       } else {
         const tempChess = new Chess(getStandardFen(fenBefore));
         try {
           const move = tempChess.move(moveStr);
           toSquare = move.to;
-          playedAction = { type: 'move', from: move.from, to: move.to, promotion: move.promotion };
+          playedAction = { type: 'move', from: move.from, to: move.to, promotion: move.promotion } as Action;
         } catch (e) {
           console.error("Failed to parse history move:", moveStr);
         }
@@ -1065,102 +1081,63 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
 
       let stateAfter = reviewGame.getState();
       if (playedAction) {
-        // Execute move on review game
         reviewGame.executeAction(playedAction);
         stateAfter = reviewGame.getState();
         positions.push(stateAfter.fen);
 
-        // Evaluate played move if it wasn't the best
         const playedMoveStr = formatMoveActionShort(playedAction);
         if (stateAfter.isCheckmate) {
-          // If the move actually ended in checkmate, it's definitively the best or brilliant
           const MATE_VAL = 50000;
           playedEval = turn === 'w' ? MATE_VAL : -MATE_VAL;
         } else if (playedMoveStr === bestMoveStr) {
           playedEval = bestEval;
         } else {
-          // Check if it's in top variations
           const matchedVar = engineResult.variations?.find(v => formatMoveActionShort(v.move) === playedMoveStr);
           if (matchedVar) {
             playedEval = matchedVar.evaluation;
           } else {
-            // Need a separate evaluation for this specific move
             const nextRes = await getBestMove(stateAfter.fen, false, 100, 6);
             playedEval = nextRes.evaluation !== undefined ? nextRes.evaluation : bestEval;
           }
         }
       }
 
-      // Classification Logic
       const perspective = turn === 'w' ? 1 : -1;
       const loss = (bestEval - playedEval) * perspective;
-
       let classification: MoveClassification = 'best';
-      let comment = '';
 
       const legalActionsCount = reviewGame.getLegalActionsCount();
       const isForced = legalActionsCount === 1;
 
       if (isForced) {
         classification = 'forced';
-      } else if (loss < 20) { // Top moves threshold
-        const beforeScore = bestEval * perspective; // Best possible score before this move
-        const afterScore = playedEval * perspective;  // Score after current move
-
-        // Find second best move to see if this was an "Only Move"
+      } else if (loss < 20) {
+        const beforeScore = bestEval * perspective;
+        const afterScore = playedEval * perspective;
         const sortedVars = engineResult.variations?.sort((a, b) => (b.evaluation - a.evaluation) * perspective) || [];
         const secondBestEval = sortedVars.length > 1 ? sortedVars[1].evaluation : (bestEval - 500 * perspective);
         const secondBestLoss = Math.abs(bestEval - secondBestEval);
 
         if (loss < 10) {
-          // Brilliant (!!) - Refined criteria:
-          // 1. Move results in a significant improvement of the position (Turnaround)
-          // 2. AND it's a very strong move compared to others (Only move)
-          // 3. AND the position was previously losing or equal (< 200)
-          if (afterScore > beforeScore + 100 && beforeScore < 200 && secondBestLoss > 150) {
-            classification = 'brilliant';
-          }
-          // Great (!) - Refined criteria:
-          // 1. Maintaining a winning position when other moves lose the advantage
-          // 2. OR being the "Only Move" in a critical spot (second best is much worse)
-          else if (secondBestLoss > 100 && afterScore > 50) {
-            classification = 'great';
-          } else {
-            classification = 'best';
-          }
-        } else {
-          classification = 'best';
-        }
-      }
-      else if (loss < 50) {
-        classification = 'excellent';
-      } else if (loss < 120) {
-        classification = 'good';
-      } else {
-        // High loss move. Check if it's a "Miss" (missing a big advantage)
+          if (afterScore > beforeScore + 100 && beforeScore < 200 && secondBestLoss > 150) classification = 'brilliant';
+          else if (secondBestLoss > 100 && afterScore > 50) classification = 'great';
+          else classification = 'best';
+        } else classification = 'best';
+      } else if (loss < 50) classification = 'excellent';
+      else if (loss < 120) classification = 'good';
+      else {
         const bestAdvantage = bestEval * perspective;
         const playedAdvantage = playedEval * perspective;
-
-        if (bestAdvantage > 200 && playedAdvantage < 50 && !stateAfter.isCheckmate) {
-          classification = 'miss';
-        } else if (loss < 300) {
-          classification = 'inaccuracy';
-        } else if (loss < 600) {
-          classification = 'mistake';
-        } else {
-          // If already significantly losing, downgrade blunder to mistake
-          if (bestAdvantage < -600 && !stateAfter.isCheckmate) {
-            classification = 'mistake';
-          } else {
-            classification = 'blunder';
-          }
+        if (bestAdvantage > 200 && playedAdvantage < 50 && !stateAfter.isCheckmate) classification = 'miss';
+        else if (loss < 300) classification = 'inaccuracy';
+        else if (loss < 600) classification = 'mistake';
+        else {
+          if (bestAdvantage < -600 && !stateAfter.isCheckmate) classification = 'mistake';
+          else classification = 'blunder';
         }
       }
 
       let moveAccuracy = calculateAccuracy(bestEval, playedEval, turn);
-
-      // If it's a top-tier move (Brilliant, Great, or Best) or leads to checkmate, it's 100% accurate.
-      // The user specified that ! and !! are 'better' than standard best moves.
       if (classification === 'brilliant' || classification === 'great' || classification === 'best' || stateAfter.isCheckmate) {
         moveAccuracy = 100;
       }
@@ -1171,29 +1148,32 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         evaluation: playedEval,
         bestMove: bestMoveStr,
         accuracy: moveAccuracy,
-        comment,
         color: turn,
         toSquare,
         variations: topVars
       });
 
-      if (turn === 'w') whiteAccTotal += moveAccuracy;
-      else blackAccTotal += moveAccuracy;
+      // Update state incrementally for "natural" feel
+      const wMoves = analyzedMoves.filter(m => m.color === 'w');
+      const bMoves = analyzedMoves.filter(m => m.color === 'b');
+      const wAccTotal = wMoves.reduce((acc, m) => acc + m.accuracy, 0);
+      const bAccTotal = bMoves.reduce((acc, m) => acc + m.accuracy, 0);
+
+      setReviewResults({
+        whiteAccuracy: wMoves.length > 0 ? wAccTotal / wMoves.length : 100,
+        blackAccuracy: bMoves.length > 0 ? bAccTotal / bMoves.length : 100,
+        moves: [...analyzedMoves],
+        fens: [...positions]
+      });
 
       setReviewProgress({ current: i + 1, total: gameState.history.length });
     }
 
-    const wCount = Math.ceil(gameState.history.length / 2);
-    const bCount = Math.floor(gameState.history.length / 2);
-
-    setReviewResults({
-      whiteAccuracy: wCount > 0 ? whiteAccTotal / wCount : 100,
-      blackAccuracy: bCount > 0 ? blackAccTotal / bCount : 100,
-      moves: analyzedMoves,
-      fens: positions
-    });
+    isReviewingRef.current = false;
     setReviewProgress(null);
-    setReviewIndex(analyzedMoves.length - 1);
+    if (!isAppend) {
+      setReviewIndex(analyzedMoves.length - 1);
+    }
   };
 
 
@@ -1230,12 +1210,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         {(isAi || isAiVsAi || isAnalysis || (gameState && (gameState.winner || gameState.isDraw))) && (
           <button
             className={activeTab === 'review' ? styles.activeControl : ''}
-            onClick={() => {
-              setActiveTab('review');
-              if (!reviewResults && !reviewProgress) {
-                handleStartReview();
-              }
-            }}
+            onClick={() => setActiveTab('review')}
           >
             🔍 게임 리뷰
           </button>
@@ -1518,24 +1493,13 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
             ) : activeTab === 'review' ? (
               <div className={styles.reviewContainer}>
                 {!reviewResults && !reviewProgress ? (
-                  <div className={styles.reviewStartArea}>
-                    <div className={styles.reviewPlaceholder}>
-                      경기가 종료되었거나 진행 중인 게임을 분석할 수 있습니다.
-                    </div>
-                    <button className={styles.reviewStartBtn} onClick={handleStartReview}>
-                      리뷰 시작하기
-                    </button>
-                  </div>
-                ) : reviewProgress ? (
                   <div className={styles.reviewProgress}>
-                    <h3>분석 중...</h3>
+                    <h3>분석 준비 중...</h3>
+                  </div>
+                ) : reviewProgress && (!reviewResults || reviewResults.moves.length === 0) ? (
+                  <div className={styles.reviewProgress}>
+                    <h3>분석 시작...</h3>
                     <p>{reviewProgress.current} / {reviewProgress.total}</p>
-                    <div className={styles.progressBar}>
-                      <div
-                        className={styles.progressFill}
-                        style={{ width: `${(reviewProgress.current / reviewProgress.total) * 100}%` }}
-                      />
-                    </div>
                   </div>
                 ) : (
                   <>
@@ -1550,9 +1514,11 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
                           <span className={styles.accuracyLabel}>흑 정확도</span>
                         </div>
                       </div>
-                      <button className={styles.reviewStartBtn} onClick={handleStartReview}>
-                        다시 분석
-                      </button>
+                      {reviewProgress && (
+                        <div className={styles.miniProgress}>
+                          분석 중... ({reviewProgress.current}/{reviewProgress.total})
+                        </div>
+                      )}
                     </div>
                     <div className={styles.reviewMoves}>
                       {reviewResults?.moves.map((move: MoveAnalysis, i: number) => (
