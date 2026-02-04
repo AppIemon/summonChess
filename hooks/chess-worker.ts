@@ -44,11 +44,11 @@ const TT_EXACT = 0;
 const TT_ALPHA = 1; // Upper bound (Fail-low)
 const TT_BETA = 2;  // Lower bound (Fail-high)
 
-const TT_SIZE = 1 << 19; // 512k entries for balanced memory and speed
+const TT_SIZE = 1 << 20; // Increased size to 1M entries for better hit rate
 const TT_KEYS = new BigUint64Array(TT_SIZE);
 const TT_VALS = new Int32Array(TT_SIZE);
 const TT_MOVES = new Int32Array(TT_SIZE);
-const TT_INFO = new Int32Array(TT_SIZE); // [0-7: depth, 8-9: flag]
+const TT_INFO = new Int32Array(TT_SIZE); // [0-7: depth, 8-15: flag]
 
 const zobristBoard = Array.from({ length: 64 }, () => new BigUint64Array(13));
 const zobristReserve = Array.from({ length: 2 }, () => Array.from({ length: 7 }, () => new BigUint64Array(16))); // [Side][PieceType][Count]
@@ -94,6 +94,7 @@ class AiGameState {
   turn: number = WHITE;
   epSquare: number = -1;
   currentHash: bigint = 0n;
+  materialScore: number = 0; // Incremental material + PSQT score
 
   getZobristIdx(p: number) {
     if (p === 0) return 0;
@@ -152,18 +153,44 @@ class AiGameState {
       parse(deckParts[1], WHITE);
       parse(deckParts[2], BLACK);
     }
+    this.recalculateScore();
   }
 
-  getSummonMask(side: number): Uint8Array {
-    const mask = new Uint8Array(64);
+  recalculateScore() {
+    let score = 0;
     for (let i = 0; i < 64; i++) {
       const pVal = this.board[i];
-      if (pVal === 0 || (side === WHITE && pVal < 0) || (side === BLACK && pVal > 0)) continue;
-      const p = Math.abs(pVal);
+      if (pVal === 0) continue;
+      const p = Math.abs(pVal), side = (pVal > 0 ? WHITE : BLACK);
+      let v = PIECE_VALS[p] + CENTER_BONUS[i];
+      if (p === PAWN) {
+        const y = i >> 3;
+        if ((side === WHITE && y === 6) || (side === BLACK && y === 1)) v += 100;
+        else if ((side === WHITE && y === 5) || (side === BLACK && y === 2)) v += 30;
+      }
+      score += side * v;
+    }
+    for (let p = 1; p <= 5; p++) {
+      score += (this.reserve[1][p] - this.reserve[0][p]) * PIECE_VALS[p] * 1.1;
+    }
+    this.materialScore = score;
+  }
+
+  private static summonMaskBuffer = new Uint8Array(64);
+
+  getSummonMask(side: number): Uint8Array {
+    const mask = AiGameState.summonMaskBuffer;
+    mask.fill(0);
+    const b = this.board;
+    for (let i = 0; i < 64; i++) {
+      const pVal = b[i];
+      if (pVal === 0) continue;
+      if (side === WHITE ? pVal < 0 : pVal > 0) continue;
+
+      const p = pVal > 0 ? pVal : -pVal;
       const x = i & 7, y = i >> 3;
       if (p === PAWN) {
-        const dy = (side === WHITE) ? 1 : -1;
-        const ny = y + dy;
+        const ny = y + (side === WHITE ? 1 : -1);
         if (ny >= 0 && ny <= 7) {
           const base = ny << 3;
           mask[base + x] = 1;
@@ -178,15 +205,14 @@ class AiGameState {
           if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) mask[(ny << 3) + nx] = 1;
         }
       } else {
-        const start = p === BISHOP ? 4 : 0;
-        const end = p === ROOK ? 4 : 8;
+        const start = p === BISHOP ? 4 : 0, end = p === ROOK ? 4 : 8;
         for (let d = start; d < end; d++) {
           const dx = ATTACK_DIRS[d][0], dy = ATTACK_DIRS[d][1];
           for (let s = 1; s < 8; s++) {
             const nx = x + dx * s, ny = y + dy * s;
             if (nx < 0 || nx > 7 || ny < 0 || ny > 7) break;
             mask[(ny << 3) + nx] = 1;
-            if (this.board[(ny << 3) + nx] !== 0) break;
+            if (b[(ny << 3) + nx] !== 0) break;
           }
         }
       }
@@ -269,25 +295,119 @@ class AiGameState {
     return moves;
   }
 
+  generateCaptures(): number[] {
+    const moves: number[] = [];
+    for (let i = 0; i < 64; i++) {
+      const pVal = this.board[i];
+      if (pVal === 0 || (this.turn === WHITE && pVal < 0) || (this.turn === BLACK && pVal > 0)) continue;
+      const p = Math.abs(pVal);
+      const x = i & 7, y = i >> 3;
+      if (p === PAWN) {
+        const dy = (this.turn === WHITE) ? 1 : -1;
+        for (const dx of [-1, 1]) {
+          const nx = x + dx, ny = y + dy;
+          if (nx >= 0 && nx <= 7 && ny >= 0 && ny <= 7) {
+            const tSq = (ny << 3) + nx;
+            const target = this.board[tSq];
+            if (target !== 0 && ((this.turn === WHITE && target < 0) || (this.turn === BLACK && target > 0))) {
+              const promo = (ny === 0 || ny === 7) ? QUEEN : 0;
+              moves.push(packMove('MOVE', i, tSq, p, target, promo, false));
+            } else if (this.epSquare === tSq) {
+              moves.push(packMove('MOVE', i, this.epSquare, p, 0, 0, true));
+            }
+          }
+        }
+      } else if (p === KNIGHT || p === KING) {
+        const dxArr = p === KNIGHT ? KNIGHT_DX : KING_DX;
+        const dyArr = p === KNIGHT ? KNIGHT_DY : KING_DY;
+        for (let k = 0; k < 8; k++) {
+          const nx = x + dxArr[k], ny = y + dyArr[k];
+          if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
+            const tSq = (ny << 3) + nx;
+            const target = this.board[tSq];
+            if (target !== 0 && (this.turn === WHITE ? target < 0 : target > 0)) {
+              moves.push(packMove('MOVE', i, tSq, p, target, 0, false));
+            }
+          }
+        }
+      } else {
+        const start = p === BISHOP ? 4 : 0, end = p === ROOK ? 4 : 8;
+        for (let d = start; d < end; d++) {
+          const dx = ATTACK_DIRS[d][0], dy = ATTACK_DIRS[d][1];
+          for (let s = 1; s < 8; s++) {
+            const nx = x + dx * s, ny = y + dy * s;
+            if (nx < 0 || nx > 7 || ny < 0 || ny > 7) break;
+            const tSq = (ny << 3) + nx, target = this.board[tSq];
+            if (target !== 0) {
+              if (this.turn === WHITE ? target < 0 : target > 0) moves.push(packMove('MOVE', i, tSq, p, target, 0, false));
+              break;
+            }
+          }
+        }
+      }
+    }
+    return moves;
+  }
+
+  getPieceValueWithPos(p: number, sq: number, side: number): number {
+    let v = PIECE_VALS[p] + CENTER_BONUS[sq];
+    if (p === PAWN) {
+      const y = sq >> 3;
+      if ((side === WHITE && y === 6) || (side === BLACK && y === 1)) v += 100;
+      else if ((side === WHITE && y === 5) || (side === BLACK && y === 2)) v += 30;
+    }
+    return v;
+  }
+
   makeMove(m: number) {
-    const prevState = { ep: this.epSquare, hash: this.currentHash, capP: getCap(m), capSq: getTo(m), oldKing: -1 };
+    const prevState = {
+      ep: this.epSquare,
+      hash: this.currentHash,
+      score: this.materialScore,
+      capP: getCap(m),
+      capSq: getTo(m),
+      oldKing: -1
+    };
+
     if (isSummon(m)) {
       const rIdx = (this.turn === WHITE) ? 1 : 0, p = getPiece(m), to = getTo(m);
       this.currentHash ^= zobristReserve[rIdx][p][this.reserve[rIdx][p]];
       this.reserve[rIdx][p]--;
+      // Incrementally update score for summon: Add piece to board, remove from reserve
+      this.materialScore += (this.turn === WHITE ? 1 : -1) * (this.getPieceValueWithPos(p, to, this.turn) - PIECE_VALS[p] * 1.1);
+
       this.board[to] = p * this.turn;
       this.updateHashSquare(to, 0, this.board[to]);
       this.epSquare = -1;
     } else {
       const from = getFrom(m), to = getTo(m), p = getPiece(m), promo = getPromo(m), moving = this.board[from];
-      this.updateHashSquare(from, moving, 0); this.board[from] = 0;
+      this.updateHashSquare(from, moving, 0);
+      // Update score for leaving from square
+      this.materialScore -= (this.turn === WHITE ? 1 : -1) * this.getPieceValueWithPos(p, from, this.turn);
+
+      this.board[from] = 0;
       if (p === KING) { prevState.oldKing = from; this.kingPos[this.turn === WHITE ? 0 : 1] = to; }
+
       if (isEP(m)) {
-        const capSq = to + (this.turn === WHITE ? -8 : 8); prevState.capSq = capSq; prevState.capP = this.board[capSq];
-        this.updateHashSquare(capSq, prevState.capP, 0); this.board[capSq] = 0;
-      } else if (prevState.capP) this.updateHashSquare(to, prevState.capP, 0);
+        const capSq = to + (this.turn === WHITE ? -8 : 8);
+        prevState.capSq = capSq; prevState.capP = this.board[capSq];
+        this.updateHashSquare(capSq, prevState.capP, 0);
+        // Update score for EP capture
+        this.materialScore -= (this.turn === WHITE ? -1 : 1) * this.getPieceValueWithPos(PAWN, capSq, -this.turn);
+        this.board[capSq] = 0;
+      } else if (prevState.capP) {
+        this.updateHashSquare(to, prevState.capP, 0);
+        // Update score for normal capture
+        this.materialScore -= (this.turn === WHITE ? -1 : 1) * this.getPieceValueWithPos(prevState.capP / -this.turn, to, -this.turn);
+      }
+
       const placed = promo ? (this.turn === WHITE ? QUEEN : -QUEEN) : moving;
-      this.board[to] = placed; this.updateHashSquare(to, 0, placed);
+      const placedP = Math.abs(placed);
+      this.board[to] = placed;
+      this.updateHashSquare(to, 0, placed);
+      // Update score for landing on to square
+      this.materialScore += (this.turn === WHITE ? 1 : -1) * this.getPieceValueWithPos(placedP, to, this.turn);
+
       this.epSquare = (p === PAWN && Math.abs(from - to) === 16) ? (from + to) >> 1 : -1;
     }
     this.turn *= -1; this.currentHash ^= zobristTurn;
@@ -295,7 +415,10 @@ class AiGameState {
   }
 
   undoMove(m: number, prev: any) {
-    this.turn *= -1; this.currentHash = prev.hash; this.epSquare = prev.ep;
+    this.turn *= -1;
+    this.currentHash = prev.hash;
+    this.epSquare = prev.ep;
+    this.materialScore = prev.score;
     if (isSummon(m)) {
       const rIdx = (this.turn === WHITE) ? 1 : 0, p = getPiece(m), to = getTo(m);
       this.board[to] = 0; this.reserve[rIdx][p]++;
@@ -419,46 +542,45 @@ class AiGameState {
   }
 
   evaluate(): number {
-    let score = 0;
+    let score = this.materialScore;
     const wk = this.kingPos[0], bk = this.kingPos[1];
     const wkx = wk & 7, wky = wk >> 3, bkx = bk & 7, bky = bk >> 3;
 
-    // 1. Piece Material & Position
+    // King proximity bonus (Pressure on enemy king)
     for (let i = 0; i < 64; i++) {
       const pVal = this.board[i];
       if (pVal === 0) continue;
       const p = Math.abs(pVal), x = i & 7, y = i >> 3, side = (pVal > 0 ? WHITE : BLACK);
-      let v = PIECE_VALS[p] + CENTER_BONUS[i];
-
-      if (p === PAWN) {
-        if ((side === WHITE && y === 6) || (side === BLACK && y === 1)) v += 100;
-        else if ((side === WHITE && y === 5) || (side === BLACK && y === 2)) v += 30;
+      const enemyKingPos = side === WHITE ? bk : wk;
+      if (enemyKingPos !== -1) {
+        const ekx = enemyKingPos & 7, eky = enemyKingPos >> 3;
+        const dist = Math.max(Math.abs(x - ekx), Math.abs(y - eky));
+        if (dist <= 2) score += side * (3 - dist) * 20;
       }
-
-      // King proximity bonus (Pressure on enemy king)
-      const dist = Math.max(Math.abs(x - (side === WHITE ? bkx : wkx)), Math.abs(y - (side === WHITE ? bky : wky)));
-      if (dist <= 2) v += (3 - dist) * 20;
-      score += side * v;
     }
 
-    // 2. Reserve Material & Tactical Potential
-    for (let p = 1; p <= 5; p++) {
-      const wCount = this.reserve[1][p];
-      const bCount = this.reserve[0][p];
-      score += wCount * PIECE_VALS[p] * 1.1;
-      score -= bCount * PIECE_VALS[p] * 1.1;
+    // 2. Tactical Potential using Summon Masks
+    const whiteSummonMask = this.getSummonMask(WHITE);
+    // Note: getSummonMask uses a shared buffer, so we need to copy or use it before next call
+    const whiteMaskCopy = new Uint8Array(whiteSummonMask);
+    const blackSummonMask = this.getSummonMask(BLACK);
+    // Now blackSummonMask is the shared buffer.
 
-      // Special Tactical: Queen/Knight in reserve potential near enemy king
-      if (p === QUEEN || p === KNIGHT) {
-        for (let k = 0; k < 8; k++) {
-          const wnx = bkx + KING_DX[k], wny = bky + KING_DY[k];
-          if (wnx >= 0 && wnx < 8 && wny >= 0 && wny < 8 && wCount > 0) {
-            if (this.isSquareSummonable((wny << 3) + wnx, WHITE)) score += p === QUEEN ? 120 : 60;
-          }
-          const bnx = wkx + KING_DX[k], bny = wky + KING_DY[k];
-          if (bnx >= 0 && bnx < 8 && bny >= 0 && bny < 8 && bCount > 0) {
-            if (this.isSquareSummonable((bny << 3) + bnx, BLACK)) score -= p === QUEEN ? 120 : 60;
-          }
+    for (let k = 0; k < 8; k++) {
+      const wnx = bkx + KING_DX[k], wny = bky + KING_DY[k];
+      if (wnx >= 0 && wnx < 8 && wny >= 0 && wny < 8) {
+        const idx = (wny << 3) + wnx;
+        if (whiteMaskCopy[idx]) {
+          if (this.reserve[1][QUEEN] > 0) score += 120;
+          if (this.reserve[1][KNIGHT] > 0) score += 60;
+        }
+      }
+      const bnx = wkx + KING_DX[k], bny = wky + KING_DY[k];
+      if (bnx >= 0 && bnx < 8 && bny >= 0 && bny < 8) {
+        const idx = (bny << 3) + bnx;
+        if (blackSummonMask[idx]) {
+          if (this.reserve[0][QUEEN] > 0) score -= 120;
+          if (this.reserve[0][KNIGHT] > 0) score -= 60;
         }
       }
     }
@@ -466,8 +588,6 @@ class AiGameState {
     // 3. King Safety & Trap Detection
     const wm = this.getKingMobility(WHITE), bm = this.getKingMobility(BLACK);
     score += (wm - bm) * 35;
-    if (wm === 0) score -= 400;
-    if (bm === 0) score += 400;
 
     const wCheck = this.isInCheck(WHITE), bCheck = this.isInCheck(BLACK);
     if (wCheck) score -= (wm === 0 ? 8000 : 500);
@@ -477,13 +597,13 @@ class AiGameState {
     if (bm <= 1 && this.reserve[1][KNIGHT] > 0) {
       for (let k = 0; k < 8; k++) {
         const nx = bkx + KNIGHT_DX[k], ny = bky + KNIGHT_DY[k];
-        if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8 && this.isSquareSummonable((ny << 3) + nx, WHITE)) { score += 1200; break; }
+        if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8 && whiteMaskCopy[(ny << 3) + nx]) { score += 1200; break; }
       }
     }
     if (wm <= 1 && this.reserve[0][KNIGHT] > 0) {
       for (let k = 0; k < 8; k++) {
         const nx = wkx + KNIGHT_DX[k], ny = wky + KNIGHT_DY[k];
-        if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8 && this.isSquareSummonable((ny << 3) + nx, BLACK)) { score -= 1200; break; }
+        if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8 && blackSummonMask[(ny << 3) + nx]) { score -= 1200; break; }
       }
     }
 
@@ -497,6 +617,7 @@ let searchStartTime = 0;
 let searchMAX_TIME = 3500;
 let isSearchAborted = false;
 const killers: Int32Array = new Int32Array(128); // 2 killers per ply up to 64 ply
+const historyHeuristic: Int32Array = new Int32Array(64 * 64); // History heuristic
 
 function scoreMove(gs: AiGameState, m: number, hashM: number, ply: number): number {
   if (m === hashM) return 1000000;
@@ -505,6 +626,7 @@ function scoreMove(gs: AiGameState, m: number, hashM: number, ply: number): numb
 
   if (isSummon(m)) {
     const oppKingPos = gs.kingPos[gs.turn === WHITE ? 1 : 0];
+    if (oppKingPos === -1) return 10001;
     const kx = oppKingPos % 8, ky = Math.floor(oppKingPos / 8);
     const tx = getTo(m) % 8, ty = Math.floor(getTo(m) / 8);
     const dist = Math.max(Math.abs(tx - kx), Math.abs(ty - ky));
@@ -525,6 +647,10 @@ function scoreMove(gs: AiGameState, m: number, hashM: number, ply: number): numb
 
   if (m === killers[ply << 1] || m === killers[(ply << 1) + 1]) return 9000;
   if (getPromo(m)) return 9500;
+
+  if (!isSummon(m)) {
+    return historyHeuristic[getFrom(m) * 64 + getTo(m)];
+  }
   return 0;
 }
 
@@ -538,7 +664,7 @@ function quiescence(gs: AiGameState, alpha: number, beta: number, ply: number = 
   if (standPat >= beta) return beta;
   if (alpha < standPat) alpha = standPat;
 
-  const moves = gs.generateMoves().filter(m => getCap(m) !== 0 || getPromo(m) !== 0);
+  const moves = gs.generateCaptures();
   moves.sort((a, b) => scoreMove(gs, b, 0, 0) - scoreMove(gs, a, 0, 0));
 
   for (const m of moves) {
@@ -607,11 +733,23 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, 
     }
     moveCount++;
 
+    let val: number;
     let extension = 0;
     const isCheck = gs.isInCheck(gs.turn);
     if (isCheck && extensionCount < 2) extension = 1;
 
-    const val = -alphaBeta(gs, depth - 1 + extension, -beta, -alpha, ply + 1, extensionCount + extension);
+    if (moveCount === 1) {
+      val = -alphaBeta(gs, depth - 1 + extension, -beta, -alpha, ply + 1, extensionCount + extension);
+    } else {
+      // Late Move Reductions (LMR)
+      if (depth >= 3 && moveCount > 4 && !isCheck && !getCap(m) && !getPromo(m)) {
+        val = -alphaBeta(gs, depth - 2, -alpha - 1, -alpha, ply + 1, extensionCount);
+        if (val > alpha) val = -alphaBeta(gs, depth - 1 + extension, -beta, -alpha, ply + 1, extensionCount + extension);
+      } else {
+        val = -alphaBeta(gs, depth - 1 + extension, -beta, -alpha, ply + 1, extensionCount + extension);
+      }
+    }
+
     gs.undoMove(m, prevState);
 
     if (isSearchAborted) return 0;
@@ -622,10 +760,19 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, 
       if (ts > MATE_THRESHOLD) ts += ply; else if (ts < -MATE_THRESHOLD) ts -= ply;
       TT_KEYS[hashIdx] = gs.currentHash; TT_VALS[hashIdx] = ts; TT_MOVES[hashIdx] = m;
       TT_INFO[hashIdx] = (depth << 8) | TT_BETA;
-      if (!getCap(m)) { killers[(ply << 1) + 1] = killers[ply << 1]; killers[ply << 1] = m; }
+      if (!getCap(m)) {
+        killers[(ply << 1) + 1] = killers[ply << 1];
+        killers[ply << 1] = m;
+      }
       return val;
     }
-    if (val > alpha) { alpha = val; flag = TT_EXACT; }
+    if (val > alpha) {
+      alpha = val;
+      flag = TT_EXACT;
+      if (!getCap(m) && !isSummon(m)) {
+        historyHeuristic[getFrom(m) * 64 + getTo(m)] += depth * depth;
+      }
+    }
   }
 
   if (moveCount === 0) {
@@ -679,6 +826,9 @@ self.onmessage = (e) => {
   const maxSearchDepth = requestedDepth || 6;
   let lastBestMove = 0, finalVariations: any[] = [];
 
+  // Clear history for new search
+  historyHeuristic.fill(0);
+
   for (let d = 1; d <= maxSearchDepth; d++) {
     if (d > 1 && Date.now() - searchStartTime > searchMAX_TIME * 0.7) break;
     const val = alphaBeta(gs, d, -INF, INF, 0);
@@ -687,10 +837,11 @@ self.onmessage = (e) => {
     const hIdx = Number(gs.currentHash % BigInt(TT_SIZE));
     if (TT_KEYS[hIdx] === gs.currentHash && TT_MOVES[hIdx]) {
       lastBestMove = TT_MOVES[hIdx];
+      const tempGs = new AiGameState(); tempGs.loadFen(fen);
       finalVariations = [{
         move: unpack(lastBestMove),
         evaluation: (gs.turn === 1) ? val : -val,
-        pv: getPV(gs, d).map(unpack)
+        pv: getPV(tempGs, d).map(unpack)
       }];
     }
   }

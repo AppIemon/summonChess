@@ -21,29 +21,34 @@ export const useChessEngine = () => {
   const getBestMove = async (fen: string, isAiVsAi: boolean = false, accuracy: number = 100, depth?: number): Promise<{ type: 'MOVE' | 'RESIGN'; move?: any; evaluation?: number; depth?: number; variations?: any[] }> => {
     // 1. Check MongoDB Cache
     try {
-      // Occasionally skip cache for variety/exploration
-      // Higher skip rate for AI vs AI to encourage learning new variations
-      const skipChance = isAiVsAi ? 0.3 : 0.1;
+      // Occasionally skip cache for variety/exploration if accuracy is 100
+      const skipChance = (isAiVsAi || accuracy < 100) ? 0.3 : 0.05;
       const skipCache = Math.random() < skipChance;
 
-      if (!skipCache && accuracy >= 100 && !depth) { // Don't use cache if accuracy < 100 as we want variety, or if custom depth is requested
-        const resp = await fetch(`/api/ai/best-move?fen=${encodeURIComponent(fen)}`);
+      if (!skipCache) {
+        const url = new URL('/api/ai/best-move', window.location.origin);
+        url.searchParams.set('fen', fen);
+
+        const resp = await fetch(url.toString());
         if (resp.ok) {
           const data = await resp.json();
+          // If we have a cached move, check if its depth is sufficient
           if (data.bestMove) {
-            console.log('AI using cached move from MongoDB');
-            // Note: Cache currently only stores one move, so variations won't be in cache
-            return {
-              type: 'MOVE',
-              move: data.bestMove.move,
-              evaluation: data.bestMove.score,
-              depth: data.bestMove.depth,
-              variations: [] // Cache doesn't have variations yet
-            };
+            const requestedDepth = depth || 4; // Default depth is 4 in UI
+            if (data.bestMove.depth >= requestedDepth) {
+              console.log(`AI using cached move from MongoDB (depth ${data.bestMove.depth} >= ${requestedDepth})`);
+              return {
+                type: 'MOVE',
+                move: data.bestMove.move,
+                evaluation: data.bestMove.score,
+                depth: data.bestMove.depth,
+                variations: []
+              };
+            }
           }
         }
       } else {
-        console.log('AI skipping cache for exploration or accuracy control');
+        console.log('AI skipping cache for exploration');
       }
     } catch (err) {
       console.warn('Failed to fetch cached AI move:', err);
@@ -63,8 +68,8 @@ export const useChessEngine = () => {
           workerRef.current?.removeEventListener('message', handleMessage);
           const result = e.data;
 
-          // 3. Save to MongoDB for future use (only if 100% accuracy and default depth)
-          if (accuracy >= 100 && !depth && result.type === 'MOVE' && result.move) {
+          // 3. Save to MongoDB for future use (only if 100% accuracy)
+          if (accuracy >= 100 && result.type === 'MOVE' && result.move) {
             try {
               fetch('/api/ai/best-move', {
                 method: 'POST',
@@ -73,7 +78,7 @@ export const useChessEngine = () => {
                   fen,
                   move: result.move,
                   score: result.evaluation || 0,
-                  depth: result.depth || 4
+                  depth: result.depth || depth || 4
                 })
               }).catch(err => console.error('Cache save failed:', err));
             } catch (err) {
