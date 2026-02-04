@@ -1159,12 +1159,10 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
 
       let moveAccuracy = calculateAccuracy(bestEval, playedEval, turn);
 
-      // If it's a checkmate move, ensure it's at least 'best' and 100% accuracy
-      if (stateAfter.isCheckmate) {
+      // If it's a top-tier move (Brilliant, Great, or Best) or leads to checkmate, it's 100% accurate.
+      // The user specified that ! and !! are 'better' than standard best moves.
+      if (classification === 'brilliant' || classification === 'great' || classification === 'best' || stateAfter.isCheckmate) {
         moveAccuracy = 100;
-        if (classification === 'miss' || classification === 'blunder' || classification === 'mistake' || classification === 'inaccuracy') {
-          classification = 'best';
-        }
       }
 
       analyzedMoves.push({
