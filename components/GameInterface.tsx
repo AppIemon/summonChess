@@ -221,13 +221,16 @@ function VariationsView({ variations, depth }: { variations: any[], depth: numbe
   if (!variations || variations.length === 0) return null;
 
   const formatMove = (m: any) => {
-    if (m.type === 'SUMMON') {
-      const typeNames: any = { 1: '', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K' };
-      const to = `${'abcdefgh'[m.to % 8]}${Math.floor(m.to / 8) + 1}`;
-      return `${typeNames[m.piece]}@${to}`;
+    if (!m) return '';
+    if (typeof m === 'string') return m;
+    if (m.type === 'SUMMON' || m.type === 'summon') {
+      const typeNames: any = { 1: '', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K', 'p': '', 'n': 'N', 'b': 'B', 'r': 'R', 'q': 'Q', 'k': 'K' };
+      const piece = m.piece in typeNames ? typeNames[m.piece] : m.piece;
+      const to = typeof m.to === 'number' ? `${'abcdefgh'[m.to % 8]}${Math.floor(m.to / 8) + 1}` : m.square;
+      return `${piece}@${to}`;
     } else {
-      const from = `${'abcdefgh'[m.from % 8]}${Math.floor(m.from / 8) + 1}`;
-      const to = `${'abcdefgh'[m.to % 8]}${Math.floor(m.to / 8) + 1}`;
+      const from = typeof m.from === 'number' ? `${'abcdefgh'[m.from % 8]}${Math.floor(m.from / 8) + 1}` : m.from;
+      const to = typeof m.to === 'number' ? `${'abcdefgh'[m.to % 8]}${Math.floor(m.to / 8) + 1}` : m.to;
       return `${from}${to}`;
     }
   };
@@ -247,13 +250,13 @@ function VariationsView({ variations, depth }: { variations: any[], depth: numbe
     <div className={styles.variationsContainer}>
       <div className={styles.variationsHeader}>상위 수순 (깊이 {depth})</div>
       <div className={styles.variationsList}>
-        {variations.map((v, i) => (
+        {variations.slice(0, 3).map((v, i) => (
           <div key={i} className={styles.variationItem}>
             <span className={clsx(styles.variationEval, v.evaluation >= 0 ? styles.evalPos : styles.evalNeg)}>
               {getEvalText(v.evaluation)}
             </span>
             <div className={styles.variationMoves}>
-              {v.pv.map((m: any, j: number) => (
+              {v.pv.slice(0, 5).map((m: any, j: number) => (
                 <span key={j} className={styles.variationMove}>
                   {j % 2 === 0 ? `${Math.floor(j / 2) + 1}.` : ''} {formatMove(m)}
                 </span>
@@ -261,6 +264,77 @@ function VariationsView({ variations, depth }: { variations: any[], depth: numbe
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// Variations Modal Component
+function VariationsModal({ move, onClose }: { move: MoveAnalysis, onClose: () => void }) {
+  const formatMove = (m: any) => {
+    if (!m) return '';
+    if (typeof m === 'string') return m;
+    if (m.type === 'SUMMON' || m.type === 'summon') {
+      const typeNames: any = { 1: '', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K', 'p': '', 'n': 'N', 'b': 'B', 'r': 'R', 'q': 'Q', 'k': 'K' };
+      const piece = m.piece in typeNames ? typeNames[m.piece] : m.piece;
+      const to = typeof m.to === 'number' ? `${'abcdefgh'[m.to % 8]}${Math.floor(m.to / 8) + 1}` : m.square;
+      return `${String(piece).toUpperCase()}@${to}`;
+    } else {
+      const from = typeof m.from === 'number' ? `${'abcdefgh'[m.from % 8]}${Math.floor(m.from / 8) + 1}` : m.from;
+      const to = typeof m.to === 'number' ? `${'abcdefgh'[m.to % 8]}${Math.floor(m.to / 8) + 1}` : m.to;
+      return `${from}${to}`;
+    }
+  };
+
+  const getEvalText = (score: number) => {
+    if (Math.abs(score) > 40000) {
+      const MATE_SCORE = 50000;
+      const plies = MATE_SCORE - Math.abs(score);
+      const moves = Math.ceil(plies / 2);
+      return score > 0 ? `+M${moves}` : `-M${moves}`;
+    }
+    const val = (score / 100).toFixed(1);
+    return score > 0 ? `+${val}` : val;
+  };
+
+  return (
+    <div className={styles.undoOverlay} onClick={onClose} style={{ zIndex: 3000 }}>
+      <div className={styles.undoCard} onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+        <h3>수순 보기</h3>
+        <div style={{ margin: '20px 0', textAlign: 'left' }}>
+          <div style={{ marginBottom: '15px', paddingBottom: '15px', borderBottom: '1px solid #eee' }}>
+            <strong>최선의 수:</strong> <span style={{ fontFamily: 'monospace', fontSize: '1.2rem', color: '#95bb4a' }}>{move.bestMove}</span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {move.variations?.slice(0, 3).map((v, i) => (
+              <div key={i} style={{ background: '#f8f9fa', padding: '12px', borderRadius: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <strong>변화수 {i + 1}</strong>
+                  <span className={clsx(v.evaluation >= 0 ? styles.evalPos : styles.evalNeg)} style={{ fontWeight: 'bold' }}>
+                    {getEvalText(v.evaluation)}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {v.pv.map((m: any, j: number) => (
+                    <span key={j} style={{
+                      background: '#fff',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      fontSize: '0.85rem',
+                      border: '1px solid #ddd',
+                      fontFamily: 'monospace',
+                      color: '#333'
+                    }}>
+                      {j % 2 === 0 ? `${Math.floor(j / 2) + 1}.` : ''} {formatMove(m)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <button className={styles.navBtn} onClick={onClose} style={{ width: '100%', marginTop: '10px' }}>닫기</button>
       </div>
     </div>
   );
@@ -328,15 +402,17 @@ const calculateAccuracy = (bestEval: number, playedEval: number, turn: PieceColo
 };
 
 const formatMoveActionShort = (m: any) => {
-  if (m.type === 'SUMMON') {
-    const typeNames: any = { 1: 'P', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K' };
-    const to = `${'abcdefgh'[m.to % 8]}${Math.floor(m.to / 8) + 1}`;
-    return `${typeNames[m.piece]}@${to}`;
-  } else {
-    const from = `${'abcdefgh'[m.from % 8]}${Math.floor(m.from / 8) + 1}`;
-    const to = `${'abcdefgh'[m.to % 8]}${Math.floor(m.to / 8) + 1}`;
-    return `${from}${to}`;
+  if (!m) return '';
+  if (typeof m === 'string') return m;
+  if (m.type === 'SUMMON' || m.type === 'summon') {
+    const typeNames: any = { 1: '', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K', 'p': '', 'n': 'N', 'b': 'B', 'r': 'R', 'q': 'Q', 'k': 'K' };
+    const piece = m.piece in typeNames ? typeNames[m.piece] : (m.piece || '');
+    const to = typeof m.to === 'number' ? `${'abcdefgh'[m.to % 8]}${Math.floor(m.to / 8) + 1}` : (m.square || m.to);
+    return `${String(piece).toUpperCase()}@${to}`;
   }
+  const from = typeof m.from === 'number' ? `${'abcdefgh'[m.from % 8]}${Math.floor(m.from / 8) + 1}` : m.from;
+  const to = typeof m.to === 'number' ? `${'abcdefgh'[m.to % 8]}${Math.floor(m.to / 8) + 1}` : m.to;
+  return `${from}${to}${m.promotion ? m.promotion : ''}`;
 };
 
 export default function GameInterface({ gameId, isAnalysis = false, isAi = false, isAiVsAi = false, initialAccuracy = 100 }: GameInterfaceProps) {
@@ -406,6 +482,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   const [reviewProgress, setReviewProgress] = useState<{ current: number, total: number } | null>(null);
   const [reviewResults, setReviewResults] = useState<GameReviewResults | null>(null);
   const [reviewIndex, setReviewIndex] = useState<number | null>(null);
+  const [shownVariationsIndex, setShownVariationsIndex] = useState<number | null>(null);
   const isReviewingRef = useRef(false);
 
   // AI Difficulty (Brain Usage / Accuracy 10-100)
@@ -1039,35 +1116,12 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         moveAccuracy = 100;
       }
 
-      // Generate Reasoning Comment
-      let comment = '';
-      if (classification === 'best') comment = '해당 상황에서 가장 최선의 수입니다.';
-      else if (classification === 'brilliant') comment = '전세를 뒤엎는 놀라운 한 수입니다!';
-      else if (classification === 'great') comment = '매우 강력한 공격 수단이거나 유일한 방어책입니다.';
-      else if (classification === 'excellent' || classification === 'good') comment = '안정적이고 좋은 수입니다.';
-      else {
-        const nextPerspective = turn === 'w' ? 1 : -1;
-        const diff = (bestEval - playedEval) * nextPerspective;
-        if (diff > 200) {
-          comment = `더 좋은 수(${bestMoveStr})가 있었습니다. 상대에게 기회를 줄 수 있습니다.`;
-        } else {
-          comment = `약간 아쉬운 수입니다. 최선의 수(${bestMoveStr})는 다른 결과를 가져왔을 수 있습니다.`;
-        }
-      }
-
-      // Add variation summary if available
-      if (topVars.length > 0 && classification !== 'best' && classification !== 'brilliant' && classification !== 'forced') {
-        const variation = topVars[0].pv.join(' ');
-        comment += ` (참고 수순: ${variation})`;
-      }
-
       analyzedMoves.push({
         move: moveStr,
         classification,
         evaluation: playedEval,
         bestMove: bestMoveStr,
         accuracy: moveAccuracy,
-        comment,
         color: turn,
         toSquare,
         variations: topVars
@@ -1465,9 +1519,17 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
                                 {getClassificationText(move.classification)}
                               </span>
                             </div>
-                            <div className={styles.moveAnalysisText}>
-                              {move.comment}
-                            </div>
+                            {move.classification !== 'best' && move.classification !== 'brilliant' && move.classification !== 'forced' && (
+                              <button
+                                className={styles.showVarsBtn}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShownVariationsIndex(i);
+                                }}
+                              >
+                                수순보기
+                              </button>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -1533,6 +1595,12 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
             }
           }}>현재 FEN 복사</button>
         </div>
+      )}
+      {shownVariationsIndex !== null && reviewResults && (
+        <VariationsModal
+          move={reviewResults.moves[shownVariationsIndex]}
+          onClose={() => setShownVariationsIndex(null)}
+        />
       )}
     </div>
   );
