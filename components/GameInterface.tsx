@@ -408,7 +408,8 @@ const formatMoveActionShort = (m: any) => {
     const typeNames: any = { 1: '', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K', 'p': '', 'n': 'N', 'b': 'B', 'r': 'R', 'q': 'Q', 'k': 'K' };
     const piece = m.piece in typeNames ? typeNames[m.piece] : (m.piece || '');
     const to = typeof m.to === 'number' ? `${'abcdefgh'[m.to % 8]}${Math.floor(m.to / 8) + 1}` : (m.square || m.to);
-    return `${String(piece).toUpperCase()}@${to}`;
+    const pieceStr = piece === '' ? 'P' : String(piece).toUpperCase();
+    return `${pieceStr}@${to}`;
   }
   const from = typeof m.from === 'number' ? `${'abcdefgh'[m.from % 8]}${Math.floor(m.from / 8) + 1}` : m.from;
   const to = typeof m.to === 'number' ? `${'abcdefgh'[m.to % 8]}${Math.floor(m.to / 8) + 1}` : m.to;
@@ -544,6 +545,9 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         setSelectedSquare(null);
         setSelectedHandPiece(null);
         setValidTargetSquares([]);
+      } else {
+        console.error('Local Action Failed:', res.error);
+        if (!aiMoveObj) alert(`작업 실패: ${res.error}`);
       }
       return;
     }

@@ -271,15 +271,26 @@ export class SummonChessGame {
     const turn = this.chess.turn();
     const deck = turn === 'w' ? this.whiteDeck : this.blackDeck;
     const pieceIndex = deck.indexOf(piece);
-
-    if (pieceIndex === -1) return { success: false, error: "Piece not in deck" };
-    if (this.chess.get(square)) return { success: false, error: "Square occupied" };
-    if (!isReachableByOwnPiece(this.chess, square, turn)) return { success: false, error: "Square not reachable" };
+    if (pieceIndex === -1) {
+      console.warn('Summon failed: Piece not in deck', { piece, deck });
+      return { success: false, error: "Piece not in deck" };
+    }
+    if (this.chess.get(square)) {
+      console.warn('Summon failed: Square occupied', { square });
+      return { success: false, error: "Square occupied" };
+    }
+    if (!isReachableByOwnPiece(this.chess, square, turn)) {
+      console.warn('Summon failed: Square not reachable', { square, turn });
+      return { success: false, error: "Square not reachable" };
+    }
 
     const rank = parseInt(square[1]);
     if (piece === 'p' && (rank === 1 || rank === 8)) return { success: false, error: "Invalid pawn rank" };
 
-    if (!this.chess.put({ type: piece, color: turn }, square)) return { success: false, error: "Put failed" };
+    if (!this.chess.put({ type: piece, color: turn }, square)) {
+      console.warn('Summon failed: chess.put returned false', { piece, turn, square });
+      return { success: false, error: "Put failed" };
+    }
 
     // Clear undo request on new move/summon
     this.undoRequest = null;
@@ -428,7 +439,11 @@ export function isReachableByOwnPiece(chess: Chess, target: Square, color: Piece
     for (let c = 0; c < 8; c++) {
       const sq = (String.fromCharCode(97 + c) + (r + 1)) as Square;
       const p = chess.get(sq);
-      if (p && p.color === color && canPieceReach(chess, p.type, c, r, tx, ty, color)) return true;
+      if (p && p.color.toLowerCase() === color.toLowerCase()) {
+        if (canPieceReach(chess, p.type.toLowerCase(), c, r, tx, ty, color)) {
+          return true;
+        }
+      }
     }
   }
   return false;
@@ -438,7 +453,8 @@ function canPieceReach(chess: Chess, type: string, fx: number, fy: number, tx: n
   const dx = tx - fx, dy = ty - fy;
   if (dx === 0 && dy === 0) return false;
   const adx = Math.abs(dx), ady = Math.abs(dy);
-  switch (type) {
+  const t = type.toLowerCase();
+  switch (t) {
     case 'p': return adx <= 1 && dy === (color === 'w' ? 1 : -1);
     case 'n': return (adx === 2 && ady === 1) || (adx === 1 && ady === 2);
     case 'k': return adx <= 1 && ady <= 1;
