@@ -432,9 +432,12 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       setLocalGame(game);
       setLocalGameState(game.getState());
       if (isAi) {
-        setMyColor(Math.random() < 0.5 ? 'w' : 'b');
+        const col = Math.random() < 0.5 ? 'w' : 'b';
+        setMyColor(col);
+        setBoardOrientation(col);
       } else {
         setMyColor('w');
+        setBoardOrientation('w');
       }
     }
   }, [isAnalysis, isAi]);
@@ -444,7 +447,8 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [selectedHandPiece, setSelectedHandPiece] = useState<PieceType | null>(null);
   const [validTargetSquares, setValidTargetSquares] = useState<string[]>([]);
-  const [myColor, setMyColor] = useState<PieceColor>('w');
+  const [myColor, setMyColor] = useState<PieceColor>('w'); // Player's actual color/side
+  const [boardOrientation, setBoardOrientation] = useState<PieceColor>('w'); // Current board view orientation
   const [showVictory, setShowVictory] = useState(false);
   const [victoryShown, setVictoryShown] = useState(false);
 
@@ -579,8 +583,10 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
     if (gameState && playerId && !isSpectator) {
       if (playerId === gameState.whitePlayerId) {
         setMyColor('w');
+        setBoardOrientation('w');
       } else if (playerId === gameState.blackPlayerId) {
         setMyColor('b');
+        setBoardOrientation('b');
       }
     }
   }, [gameState?.whitePlayerId, gameState?.blackPlayerId, playerId, isSpectator]);
@@ -1189,7 +1195,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
             🔍 게임 리뷰
           </button>
         )}
-        <button onClick={() => setMyColor(myColor === 'w' ? 'b' : 'w')}>🔄 보드 뒤집기</button>
+        <button onClick={() => setBoardOrientation(boardOrientation === 'w' ? 'b' : 'w')}>🔄 보드 뒤집기</button>
         {!isAnalysis && <button onClick={handleUndoRequest} disabled={!!gameState.undoRequest || gameState.history.length === 0}>↩️ 무르기</button>}
         {isAnalysis && <button onClick={handleUndoRequest} disabled={gameState.history.length === 0}>↩️ 무르기</button>}
         {!isAnalysis && <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/room/${gameId}`); alert('링크가 복사되었습니다!'); }}>📋 링크 공유</button>}
@@ -1286,7 +1292,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
               color={myColor}
               onSelect={handleHandSelect}
               selectedPiece={selectedHandPiece}
-              disabled={true}
+              disabled={isSpectator || activeTab === 'review' || (gameState.turn !== myColor && !isAnalysis)}
             />
           </div>
           <div className={styles.sidebarSection}>
@@ -1298,7 +1304,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
               color={opponentColor}
               onSelect={handleHandSelect}
               selectedPiece={selectedHandPiece}
-              disabled={true}
+              disabled={isSpectator || activeTab === 'review' || (gameState.turn !== opponentColor && !isAnalysis) || !isAnalysis}
             />
           </div>
         </div>
@@ -1328,7 +1334,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
               onSquareClick={handleSquareClick}
               selectedSquare={selectedSquare}
               validTargetSquares={validTargetSquares}
-              orientation={myColor}
+              orientation={boardOrientation}
               lastMove={activeTab === 'review' && reviewResults && reviewIndex !== null ? (
                 reviewIndex >= 0 ? { from: '', to: reviewResults.moves[reviewIndex].toSquare } : null
               ) : gameState.lastMove}
@@ -1453,8 +1459,8 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
                     pieces={myDeck}
                     color={myColor}
                     onSelect={handleHandSelect}
-                    selectedPiece={gameState.turn === myColor ? selectedHandPiece : null}
-                    disabled={isSpectator || (isAnalysis && gameState.turn !== myColor)}
+                    selectedPiece={selectedHandPiece}
+                    disabled={isSpectator || (gameState.turn !== myColor && !isAnalysis)}
                   />
                 </div>
                 <div className={styles.sidebarSection}>
@@ -1463,8 +1469,8 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
                     pieces={opponentDeck}
                     color={opponentColor}
                     onSelect={handleHandSelect}
-                    selectedPiece={gameState.turn === opponentColor ? selectedHandPiece : null}
-                    disabled={isSpectator || (!isAnalysis) || (isAnalysis && gameState.turn !== opponentColor)}
+                    selectedPiece={selectedHandPiece}
+                    disabled={isSpectator || (gameState.turn !== opponentColor && !isAnalysis) || !isAnalysis}
                   />
                 </div>
               </div>
