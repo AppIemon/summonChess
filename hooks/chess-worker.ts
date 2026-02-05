@@ -171,16 +171,14 @@ class AiGameState {
       score += side * v;
     }
     for (let p = 1; p <= 5; p++) {
-      score += (this.reserve[1][p] - this.reserve[0][p]) * PIECE_VALS[p] * 1.1;
+      // Use 11/10 to avoid floating point precision issues
+      score += Math.floor((this.reserve[1][p] - this.reserve[0][p]) * PIECE_VALS[p] * 11 / 10);
     }
     this.materialScore = score;
   }
 
-  private static summonMaskBuffer = new Uint8Array(64);
-
   getSummonMask(side: number): Uint8Array {
-    const mask = AiGameState.summonMaskBuffer;
-    mask.fill(0);
+    const mask = new Uint8Array(64);
     const b = this.board;
     for (let i = 0; i < 64; i++) {
       const pVal = b[i];
@@ -691,7 +689,7 @@ function alphaBeta(gs: AiGameState, depth: number, alpha: number, beta: number, 
     return 0;
   }
 
-  const hashIdx = Number(gs.currentHash % BigInt(TT_SIZE));
+  const hashIdx = Number(gs.currentHash & BigInt(TT_SIZE - 1));
   let hashMove = 0;
   if (TT_KEYS[hashIdx] === gs.currentHash) {
     let score = TT_VALS[hashIdx];
@@ -793,7 +791,7 @@ function getPV(gs: AiGameState, depth: number): number[] {
   for (let i = 0; i < depth; i++) {
     if (visited.has(gs.currentHash)) break;
     visited.add(gs.currentHash);
-    const hIdx = Number(gs.currentHash % BigInt(TT_SIZE));
+    const hIdx = Number(gs.currentHash & BigInt(TT_SIZE - 1));
     if (TT_KEYS[hIdx] === gs.currentHash && TT_MOVES[hIdx]) {
       const m = TT_MOVES[hIdx]; pv.push(m); gs.makeMove(m);
     } else break;
@@ -834,7 +832,8 @@ self.onmessage = (e) => {
     const val = alphaBeta(gs, d, -INF, INF, 0);
     if (isSearchAborted) break;
 
-    const hIdx = Number(gs.currentHash % BigInt(TT_SIZE));
+    // Always check for a best move at each completed depth
+    const hIdx = Number(gs.currentHash & BigInt(TT_SIZE - 1));
     if (TT_KEYS[hIdx] === gs.currentHash && TT_MOVES[hIdx]) {
       lastBestMove = TT_MOVES[hIdx];
       const tempGs = new AiGameState(); tempGs.loadFen(fen);

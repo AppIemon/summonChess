@@ -694,16 +694,24 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
         }
 
         const bestMove = result.move;
-        if (bestMove && bestMove.to !== -1) {
+        if (bestMove && (bestMove.to !== -1 || bestMove.type === 'RESIGN')) {
           console.log('AI Attempting Move:', bestMove);
-          const typeMap: Record<number, PieceType> = { 1: 'p', 2: 'n', 3: 'b', 4: 'r', 5: 'q', 6: 'k' };
-          const toSquare = `${'abcdefgh'[bestMove.to % 8]}${Math.floor(bestMove.to / 8) + 1}`;
+          const typeMap: any = { 1: 'p', 2: 'n', 3: 'b', 4: 'r', 5: 'q', 6: 'k' };
+          const pRaw = bestMove.piece;
+          const pieceType = (typeof pRaw === 'number' ? typeMap[pRaw] : (typeof pRaw === 'string' ? pRaw.toLowerCase() : 'p')) as PieceType;
+          const toSquare = typeof bestMove.to === 'number' ? `${'abcdefgh'[bestMove.to % 8]}${Math.floor(bestMove.to / 8) + 1}` : bestMove.to;
 
           if (bestMove.type === 'SUMMON') {
-            executeAction({ type: 'summon', piece: typeMap[bestMove.piece], square: toSquare } as Action, bestMove);
-          } else {
-            const fromSquare = `${'abcdefgh'[bestMove.from % 8]}${Math.floor(bestMove.from / 8) + 1}`;
+            executeAction({ type: 'summon', piece: pieceType, square: toSquare } as Action, bestMove);
+          } else if (bestMove.type === 'MOVE') {
+            const fromSquare = typeof bestMove.from === 'number' ? `${'abcdefgh'[bestMove.from % 8]}${Math.floor(bestMove.from / 8) + 1}` : bestMove.from;
             executeAction({ type: 'move', from: fromSquare, to: toSquare } as Action, bestMove);
+          }
+        } else {
+          console.warn('AI gave empty or invalid move:', result);
+          // If in AI vs AI mode and it stalls, we might need a small push
+          if (isAiVsAi) {
+            setTimeout(() => setLocalGameState({ ...localGameState! }), 2000);
           }
         }
       };
@@ -711,7 +719,7 @@ export default function GameInterface({ gameId, isAnalysis = false, isAi = false
       const timer = setTimeout(handleAiMove, isAiVsAi ? 100 : 200);
       return () => clearTimeout(timer);
     }
-  }, [isAi, aiLoaded, localGameState?.turn, myColor, isAiVsAi]);
+  }, [isAi, aiLoaded, localGameState?.turn, localGameState?.fen, myColor, isAiVsAi]);
 
   // Handle Analysis Evaluation
   useEffect(() => {

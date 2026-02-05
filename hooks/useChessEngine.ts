@@ -32,18 +32,22 @@ export const useChessEngine = () => {
         const resp = await fetch(url.toString());
         if (resp.ok) {
           const data = await resp.json();
-          // If we have a cached move, check if its depth is sufficient
-          if (data.bestMove) {
+          // If we have a cached move, check if its depth is sufficient and it's a valid move
+          if (data.bestMove && data.bestMove.move) {
             const requestedDepth = depth || 4; // Default depth is 4 in UI
             if (data.bestMove.depth >= requestedDepth) {
-              console.log(`AI using cached move from MongoDB (depth ${data.bestMove.depth} >= ${requestedDepth})`);
-              return {
-                type: 'MOVE',
-                move: data.bestMove.move,
-                evaluation: data.bestMove.score,
-                depth: data.bestMove.depth,
-                variations: []
-              };
+              // Extra safety: ensure it has a type and not empty
+              const bm = data.bestMove.move;
+              if (bm.type && (bm.type === 'MOVE' || bm.type === 'SUMMON' || bm.type === 'RESIGN')) {
+                console.log(`AI using cached move from MongoDB (depth ${data.bestMove.depth} >= ${requestedDepth})`);
+                return {
+                  type: 'MOVE',
+                  move: bm,
+                  evaluation: data.bestMove.score,
+                  depth: data.bestMove.depth,
+                  variations: []
+                };
+              }
             }
           }
         }
